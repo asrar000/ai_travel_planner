@@ -100,13 +100,13 @@ python3 main.py
 
 ## Rules Compliance
 
-- ✅ No hardcoded travel data
-- ✅ No fake cost estimates
-- ✅ Serper mandatory and enforced
-- ✅ 4 agents implemented
-- ✅ Structured Markdown + JSON output
-- ✅ Full execution logging to logs/
-- ✅ Failure handling for all API errors
+- No hardcoded travel data
+- No fake cost estimates
+- Serper mandatory and enforced
+- 4 agents implemented
+- Structured Markdown + JSON output
+- Full execution logging to logs/
+- Failure handling for all API errors
 
 ## Troubleshooting
 
