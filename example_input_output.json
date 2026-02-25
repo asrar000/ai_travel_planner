@@ -1,0 +1,31 @@
+{
+  "example_input": {
+    "destination": "Tokyo, Japan",
+    "travel_dates": "April 10-17, 2025",
+    "duration_days": 7,
+    "budget": 2500,
+    "currency": "USD",
+    "preferences": "culture, food, anime, temples, technology"
+  },
+  "example_output_structure": {
+    "Travel Plan": "Tokyo, Japan",
+    "Budget Breakdown": {
+      "accommodation": {"nightly_rate_usd": 80, "total_7_nights": 560},
+      "food":          {"daily_budget_usd": 50, "total_7_days": 350},
+      "transport":     {"ic_card": 100, "airport": 60, "total": 160},
+      "activities":    {"temples": 30, "teamlab": 80, "day_trips": 50, "total": 160},
+      "buffer_10pct":  123,
+      "TOTAL":         1353,
+      "budget_status": "PASS - Under budget by $1,147"
+    },
+    "Validation Summary": {
+      "budget_status":   "PASS",
+      "itinerary_status":"PASS - No time conflicts",
+      "data_quality":    "High - All prices from Serper searches",
+      "risk_factors": [
+        {"risk": "Cherry blossom = peak tourism", "severity": "MEDIUM",
+         "mitigation": "Book accommodation 2-3 months ahead"}
+      ]
+    }
+  }
+}
