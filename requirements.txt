@@ -2,6 +2,4 @@ crewai==0.80.0
 crewai-tools==0.17.0
 python-dotenv==1.0.1
 requests==2.32.3
-langchain-groq==1.1.2
 litellm==1.57.4
-openai==1.83.0

@@ -34,30 +34,25 @@ def create_tasks(
         description=f"""
         Research **{destination}** for dates **{travel_dates}** and preferences **{preferences}**.
 
-        Use SerperSearch for each query exactly once (no duplicate queries):
+        Use SerperSearch for each query exactly once (keep to 3 total searches):
         - "{destination} top tourist attractions {travel_dates}"
-        - "{destination} travel tips culture customs"
         - "{destination} neighborhoods where to stay"
         - "{destination} travel advisory safety {current_year}"
-        - "{destination} local food must try restaurants"
 
         Return concise Markdown with:
         1. Destination overview
-        2. Top attractions (8-10)
-        3. Culture/customs
-        4. Best neighborhoods
-        5. Weather for travel dates
-        6. Practical info (visa/currency/language/emergency)
-        7. Safety notes
-        8. Hidden gems (3+)
-        9. Food recommendations
+        2. Top attractions (5-7 only)
+        3. Best neighborhoods (stay/eat)
+        4. Weather for travel dates
+        5. Practical + safety notes
+        6. Budget/halal-friendly quick tips
 
-        Include source links and data quality caveats. Keep wording compact.
+        Keep total output short, with source links and data quality caveats.
         """,
         agent=destination_researcher,
         expected_output=f"""
-        Markdown research report for {destination} with all nine sections, concise text,
-        source links, and data-quality notes from Serper results.
+        Compact Markdown research report for {destination}, max ~320 words.
+        Include links and data-quality notes from Serper results.
         """,
         context=[]
     )
@@ -68,21 +63,19 @@ def create_tasks(
         Create budget plan for **{destination}** ({duration_days} days, {budget} {currency}).
         Dates: {travel_dates}. Preferences: {preferences}.
 
-        Use SerperSearch once per query:
+        Use SerperSearch for only 2 queries:
         - "{destination} hotel accommodation prices {travel_dates}"
-        - "{destination} average food cost per day tourist"
-        - "{destination} transportation costs local transport"
-        - "{destination} tourist activities entry fees prices"
+        - "{destination} average food, transportation and activity costs tourist"
 
         Use BudgetCalculator for arithmetic and BudgetSummary for final table.
         Categories: accommodation, food, transport, activities, 10% buffer.
         Include feasibility assessment and assumptions.
-        Do not fabricate prices.
+        Do not fabricate prices. Keep output concise.
         """,
         agent=budget_planner,
         expected_output=f"""
-        Concise Markdown budget plan with category totals, daily estimate, BudgetSummary table,
-        feasibility status, assumptions, and source links.
+        Compact Markdown budget plan, max ~260 words, with category totals,
+        daily estimate, BudgetSummary table, feasibility status, and links.
         """,
         context=[]
     )
@@ -93,18 +86,18 @@ def create_tasks(
         Design a practical {duration_days}-day itinerary for **{destination}**.
         Dates: {travel_dates}. Budget: {budget} {currency}. Preferences: {preferences}.
 
-        Use SerperSearch once per query:
-        - "{destination} attraction opening hours"
-        - "{destination} best day trips from city"
+        Use SerperSearch for 1 query:
+        - "{destination} attraction opening hours and best areas"
 
-        For each day include morning/afternoon/evening plan, estimated cost, and one tip.
+        For each day include 1 morning, 1 afternoon, 1 evening item,
+        estimated cost, and one tip.
         Ensure no time conflicts, realistic routing, and budget alignment.
         Day 1 includes arrival/check-in. Final day includes departure.
         """,
         agent=itinerary_designer,
         expected_output=f"""
-        Markdown itinerary for exactly {duration_days} days with daily schedule, costs,
-        transport notes, and total estimated cost.
+        Compact itinerary for exactly {duration_days} days, max ~320 words total,
+        with daily schedule, costs, transport notes, and total estimate.
         """,
         context=[]
     )
@@ -131,11 +124,13 @@ def create_tasks(
         ## Risk Factors
         ## Recommendations
         ## Assumptions Made
+
+        Keep final response short (about 450 words max).
         """,
         agent=validation_agent,
         expected_output=f"""
-        Final self-contained Markdown travel plan with budget table, full itinerary,
-        validation status, risk levels, recommendations, and assumptions.
+        Final concise Markdown travel plan with budget table, full itinerary,
+        validation status, top risks, recommendations, and assumptions.
         """,
         context=[task_research, task_budget, task_itinerary]
     )

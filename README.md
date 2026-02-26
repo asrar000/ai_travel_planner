@@ -82,12 +82,15 @@ nano .env
 python3 main.py
 ```
 
-## Get Free API Keys
+## Get API Keys
 
 | API | URL | Free Tier |
 |-----|-----|-----------|
 | Serper Dev | https://serper.dev | 2,500 searches/month |
-| Groq | https://console.groq.com/keys | Free tier available |
+| Groq | https://console.groq.com/keys | Provider-managed limits |
+
+Input flow uses 5 prompts only: destination, travel dates, budget, currency, preferences.
+Trip duration is auto-derived from dates (default 5 days if parsing fails).
 
 ## Agents Summary
 
@@ -113,16 +116,21 @@ python3 main.py
 | Error | Fix |
 |-------|-----|
 | `SERPER_API_KEY not found` | Check `.env` file |
-| `GROQ_API_KEY not found` | Check `.env` file |
-| `tool_use_failed` / `failed_generation` | App will retry and fallback models; tune `GROQ_MODEL` and `GROQ_MODEL_FALLBACKS` |
+| `GROQ_API_KEY not found` | Set `GROQ_API_KEY` or `GROQ_API_KEYS` in `.env` |
+| `tool_use_failed` / `failed_generation` | App retries then falls back; tune `GROQ_MODEL` and `GROQ_MODEL_FALLBACKS` |
 | `model_decommissioned` | Remove deprecated model from `GROQ_MODEL_FALLBACKS` in `.env` |
-| `Rate limit exceeded` | App auto-backs off; if repeated, increase wait/backoff vars in `.env` or lower workload |
+| `Rate limit exceeded` | App rotates to the next key from `GROQ_API_KEYS`; if all keys are limited, it backs off |
 | `Invalid response from LLM call - None or empty` | Retry once; if repeated, lower `CREWAI_MAX_RPM` and keep prompts/tool output compact |
 | `ModuleNotFoundError` | Run `source venv/bin/activate` first |
 
 Recommended rate-limit settings in `.env`:
-- `CREWAI_MAX_RPM=4`
-- `GROQ_RETRY_PER_MODEL=2`
-- `SERPER_RESULTS_LIMIT=3`
-- `SERPER_SNIPPET_MAX_CHARS=180`
-- `GROQ_MAX_COMPLETION_TOKENS=700`
+- `GROQ_MODEL=llama-3.3-70b-versatile`
+- `GROQ_MODEL_FALLBACKS=llama-3.1-8b-instant`
+- `GROQ_API_KEYS=gsk_key_1,gsk_key_2,gsk_key_3`
+- `GROQ_RETRY_PER_MODEL=1`
+- `CREWAI_MAX_RPM=2`
+- `SERPER_RESULTS_LIMIT=2`
+- `SERPER_SNIPPET_MAX_CHARS=120`
+- `SERPER_INCLUDE_SNIPPET=false`
+- `GROQ_MAX_TOKENS=280`
+- `GROQ_TEMPERATURE=0.0`

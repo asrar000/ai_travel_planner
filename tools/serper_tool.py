@@ -22,8 +22,9 @@ class SerperSearchTool(BaseTool):
         "Search web via Serper for current travel information. Input: query string."
     )
     api_key: str = Field(default="")
-    max_results: int = Field(default=3)
-    max_snippet_chars: int = Field(default=180)
+    max_results: int = Field(default=2)
+    max_snippet_chars: int = Field(default=120)
+    include_snippet: bool = Field(default=False)
     _cache: dict[str, str] = {}
 
     def __init__(self, **kwargs):
@@ -33,8 +34,9 @@ class SerperSearchTool(BaseTool):
             raise ValueError("SERPER_API_KEY not found in environment variables!")
 
         # Keep tool outputs compact to reduce LLM token pressure.
-        self.max_results = self._parse_positive_int_env("SERPER_RESULTS_LIMIT", 3, upper=5)
-        self.max_snippet_chars = self._parse_positive_int_env("SERPER_SNIPPET_MAX_CHARS", 180, upper=500)
+        self.max_results = self._parse_positive_int_env("SERPER_RESULTS_LIMIT", 2, upper=5)
+        self.max_snippet_chars = self._parse_positive_int_env("SERPER_SNIPPET_MAX_CHARS", 120, upper=500)
+        self.include_snippet = self._parse_bool_env("SERPER_INCLUDE_SNIPPET", False)
 
     @staticmethod
     def _parse_positive_int_env(name: str, default: int, upper: int) -> int:
@@ -48,6 +50,13 @@ class SerperSearchTool(BaseTool):
             return min(value, upper)
         except ValueError:
             return default
+
+    @staticmethod
+    def _parse_bool_env(name: str, default: bool) -> bool:
+        raw = os.getenv(name, "").strip().lower()
+        if not raw:
+            return default
+        return raw in {"1", "true", "yes", "on"}
 
     def _compact(self, text: str) -> str:
         text = " ".join((text or "").split())
@@ -85,7 +94,7 @@ class SerperSearchTool(BaseTool):
                 snippet = self._compact(result.get("snippet", ""))
                 link = self._compact(result.get("link", ""))
                 line = f"{i}. {title}"
-                if snippet:
+                if self.include_snippet and snippet:
                     line += f" | {snippet}"
                 if link:
                     line += f" | Source: {link}"
@@ -94,7 +103,7 @@ class SerperSearchTool(BaseTool):
             if not results:
                 return "No search results found."
 
-            output = f"Search '{query}'\n" + "\n".join(results)
+            output = "\n".join(results)
             self._cache[query] = output
             logger.info(f"[SerperTool] Got {len(results)} results for: {query}")
             return output

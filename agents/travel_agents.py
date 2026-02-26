@@ -12,11 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 class GroqToolStableLLM(LLM):
-    """CrewAI LLM wrapper that disables native function-calling for Groq.
+    """CrewAI LLM wrapper that disables native function-calling for Groq models.
 
-    CrewAI native function-calling with some Groq models can intermittently
-    produce `tool_use_failed`. Returning False here forces CrewAI's text-based
-    tool loop, which is significantly more stable for this project.
+    Returning False here keeps CrewAI on the text-based tool loop, which is
+    stable for this multi-tool workflow.
     """
 
     def supports_function_calling(self) -> bool:
@@ -34,25 +33,37 @@ def _parse_int_env(name: str, default: int) -> int:
         return default
 
 
-def get_llm(model_name: str = "llama-3.3-70b-versatile"):
-    """Initialize Groq LLM with stable (non-native) tool usage mode."""
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
+def _parse_float_env(name: str, default: float) -> float:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def get_llm(model_name: str = "llama-3.3-70b-versatile", api_key: str | None = None):
+    """Initialize Groq model with stable (non-native) tool usage mode."""
+    resolved_api_key = (api_key or os.getenv("GROQ_API_KEY", "")).strip()
+    if not resolved_api_key:
         raise ValueError("GROQ_API_KEY not found in environment variables!")
 
-    os.environ["GROQ_API_KEY"] = api_key
-    max_completion_tokens = _parse_int_env("GROQ_MAX_COMPLETION_TOKENS", 700)
-    timeout_seconds = _parse_int_env("GROQ_TIMEOUT_SECONDS", 90)
+    os.environ["GROQ_API_KEY"] = resolved_api_key
+    max_tokens = _parse_int_env("GROQ_MAX_TOKENS", 280)
+    timeout_seconds = _parse_int_env("GROQ_TIMEOUT_SECONDS", 45)
+    temperature = _parse_float_env("GROQ_TEMPERATURE", 0.0)
 
     llm = GroqToolStableLLM(
         model=f"groq/{model_name}",
-        temperature=0.2,
-        max_completion_tokens=max_completion_tokens,
+        temperature=temperature,
+        max_tokens=max_tokens,
         timeout=timeout_seconds,
     )
     logger.info(
         f"[LLM] Initialized Groq model (stable tools mode): {model_name} "
-        f"| max_completion_tokens={max_completion_tokens} | timeout={timeout_seconds}s"
+        f"| max_tokens={max_tokens} | timeout={timeout_seconds}s "
+        f"| temperature={temperature}"
     )
     return llm
 
@@ -77,7 +88,7 @@ def create_agents(serper_tool, calculator_tool, budget_summary_tool, llm):
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=7
+        max_iter=4
     )
 
     budget_planner = Agent(
@@ -96,7 +107,7 @@ def create_agents(serper_tool, calculator_tool, budget_summary_tool, llm):
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=8
+        max_iter=4
     )
 
     itinerary_designer = Agent(
@@ -115,7 +126,7 @@ def create_agents(serper_tool, calculator_tool, budget_summary_tool, llm):
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=5
+        max_iter=3
     )
 
     validation_agent = Agent(
@@ -134,7 +145,7 @@ def create_agents(serper_tool, calculator_tool, budget_summary_tool, llm):
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=4
+        max_iter=2
     )
 
     logger.info("[Agents] All 4 agents created successfully")
