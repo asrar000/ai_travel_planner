@@ -52,69 +52,79 @@ def validate_env():
 
 
 def calculate_duration(travel_dates: str) -> int:
-    """Calculate trip duration from common date-range formats."""
+    """Calculate trip duration from common date-range formats.
+
+    Supported formats:
+      - YYYY-MM-DD / YYYY-MM-DD
+      - Month DD-DD, YYYY          (e.g. March 20-25, 2026)
+      - Month DD - Month DD, YYYY  (e.g. December 28 - January 3, 2026)
+
+    Cross-year ranges (e.g. December 28 - January 3) are handled by
+    checking if the end month is earlier than the start month — in that
+    case the end date is placed in the following year automatically.
+
+    Returns 0 if the date string cannot be confidently parsed, which
+    triggers a manual duration prompt in get_user_input().
+    """
     normalized = re.sub(r"\s+to\s+", " - ", travel_dates, flags=re.IGNORECASE).strip()
 
-    def _duration(start: date, end: date) -> int | None:
+    def _duration(start: date, end: date) -> int:
+        """Return inclusive day count, or 0 if range is invalid."""
         if end < start:
-            return None
+            return 0
         days = (end - start).days + 1
-        if 1 <= days <= 60:
-            return days
-        return None
+        return days if 1 <= days <= 60 else 0
 
-    # Format: YYYY-MM-DD ... YYYY-MM-DD
+    # ── Format 1: YYYY-MM-DD - YYYY-MM-DD ─────────────────────
     iso_dates = re.findall(r"\b\d{4}-\d{1,2}-\d{1,2}\b", normalized)
     if len(iso_dates) >= 2:
         try:
             start = datetime.strptime(iso_dates[0], "%Y-%m-%d").date()
-            end = datetime.strptime(iso_dates[1], "%Y-%m-%d").date()
-            days = _duration(start, end)
+            end   = datetime.strptime(iso_dates[1], "%Y-%m-%d").date()
+            days  = _duration(start, end)
             if days:
                 return days
         except ValueError:
             pass
 
-    # Format: Month DD-DD, YYYY or Month DD-Month DD, YYYY
+    # ── Format 2: Month DD[-Month DD], YYYY ───────────────────
     month_pattern = re.search(
         r"(?P<m1>[A-Za-z]+)\s+(?P<d1>\d{1,2})\s*[-–]\s*"
         r"(?:(?P<m2>[A-Za-z]+)\s+)?(?P<d2>\d{1,2})(?:,\s*(?P<y>\d{4}))?",
         normalized,
     )
     if month_pattern:
-        try:
-            month_1 = datetime.strptime(month_pattern.group("m1"), "%B").month
-        except ValueError:
-            try:
-                month_1 = datetime.strptime(month_pattern.group("m1"), "%b").month
-            except ValueError:
-                month_1 = None
+        def _parse_month(name: str) -> int | None:
+            for fmt in ("%B", "%b"):
+                try:
+                    return datetime.strptime(name, fmt).month
+                except ValueError:
+                    continue
+            return None
 
+        month_1 = _parse_month(month_pattern.group("m1"))
         month_2_text = month_pattern.group("m2") or month_pattern.group("m1")
-        try:
-            month_2 = datetime.strptime(month_2_text, "%B").month
-        except ValueError:
-            try:
-                month_2 = datetime.strptime(month_2_text, "%b").month
-            except ValueError:
-                month_2 = None
+        month_2 = _parse_month(month_2_text)
 
         if month_1 and month_2:
-            year = int(month_pattern.group("y") or datetime.now().year)
+            year  = int(month_pattern.group("y") or datetime.now().year)
             day_1 = int(month_pattern.group("d1"))
             day_2 = int(month_pattern.group("d2"))
             try:
                 start = date(year, month_1, day_1)
-                end = date(year, month_2, day_2)
-                if end < start and month_pattern.group("m2"):
-                    end = date(year + 1, month_2, day_2)
+
+                # Cross-year range: end month is earlier than start month
+                # e.g. December 28 - January 3 → end is in year+1
+                end_year = year + 1 if month_2 < month_1 else year
+                end = date(end_year, month_2, day_2)
+
                 days = _duration(start, end)
                 if days:
                     return days
             except ValueError:
                 pass
 
-    # Fallback: could not parse confidently
+    # Could not parse confidently — caller will prompt manually
     return 0
 
 
