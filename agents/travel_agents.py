@@ -5,23 +5,37 @@ Defines all 4 required agents for the AI Travel Planner.
 
 import os
 import logging
-from crewai import Agent
+from crewai import Agent, LLM
 
 
 logger = logging.getLogger(__name__)
 
 
-logger = logging.getLogger(__name__)
+class GroqToolStableLLM(LLM):
+    """CrewAI LLM wrapper that disables native function-calling for Groq.
+
+    CrewAI native function-calling with some Groq models can intermittently
+    produce `tool_use_failed`. Returning False here forces CrewAI's text-based
+    tool loop, which is significantly more stable for this project.
+    """
+
+    def supports_function_calling(self) -> bool:
+        return False
 
 
 def get_llm(model_name: str = "llama-3.3-70b-versatile"):
-    """Initialize the Groq LLM using crewai native LLM string format."""
+    """Initialize Groq LLM with stable (non-native) tool usage mode."""
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise ValueError("GROQ_API_KEY not found in environment variables!")
+
     os.environ["GROQ_API_KEY"] = api_key
-    llm = f"groq/{model_name}"
-    logger.info(f"[LLM] Initialized Groq model: {model_name}")
+
+    llm = GroqToolStableLLM(
+        model=f"groq/{model_name}",
+        temperature=0.2,
+    )
+    logger.info(f"[LLM] Initialized Groq model (stable tools mode): {model_name}")
     return llm
 
 

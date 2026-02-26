@@ -7,6 +7,8 @@ Multi-agent system: CrewAI + Groq + Serper Dev API
 import os
 import re
 import sys
+import time
+import math
 import json
 import logging
 from datetime import date, datetime
@@ -15,6 +17,10 @@ from dotenv import load_dotenv
 from crewai import Crew, Process
 
 load_dotenv()
+
+# Force CrewAI SQLite storage to a writable project-local path.
+# This prevents readonly DB errors in constrained environments.
+os.environ.setdefault("XDG_DATA_HOME", str((Path.cwd() / ".crewai_data").resolve()))
 
 # ── Logging Setup ──────────────────────────────────────────────
 logs_dir = Path("logs")
@@ -221,6 +227,139 @@ def save_output(result: str, user_input: dict):
     return md_path
 
 
+def parse_int_env(name: str, default: int) -> int:
+    """Parse integer env var with safe fallback."""
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else default
+    except ValueError:
+        return default
+
+
+def get_model_candidates() -> list[str]:
+    """Return ordered, deduplicated model candidates for fallback."""
+    primary = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+    fallback_raw = os.getenv(
+        "GROQ_MODEL_FALLBACKS",
+        "llama-3.1-8b-instant",
+    )
+    fallback_models = [m.strip() for m in fallback_raw.split(",") if m.strip()]
+
+    models: list[str] = []
+    for model in [primary] + fallback_models:
+        if model and model not in models:
+            models.append(model)
+    return models
+
+
+def is_retryable_model_error(exc: Exception) -> bool:
+    """Identify transient/provider errors worth retrying."""
+    message = str(exc).lower()
+    if is_model_decommissioned_error(exc):
+        return False
+
+    retry_markers = [
+        "tool_use_failed",
+        "failed_generation",
+        "failed to call a function",
+        "rate_limit_exceeded",
+        "429",
+        "rate limit",
+        "timeout",
+        "timed out",
+        "connection",
+        "api_connection_error",
+        "temporarily unavailable",
+        "service unavailable",
+        "502",
+        "503",
+        "504",
+    ]
+    return any(marker in message for marker in retry_markers)
+
+
+def is_model_decommissioned_error(exc: Exception) -> bool:
+    """Detect hard model lifecycle errors that should not be retried."""
+    message = str(exc).lower()
+    return (
+        "model_decommissioned" in message
+        or "decommissioned and is no longer supported" in message
+    )
+
+
+def extract_retry_after_seconds(exc: Exception) -> int | None:
+    """Extract provider wait hint from messages like: 'try again in 13.6s'."""
+    match = re.search(r"try again in\s*([0-9]+(?:\.[0-9]+)?)s", str(exc), flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return max(1, math.ceil(float(match.group(1))))
+    except ValueError:
+        return None
+
+
+def compute_retry_wait_seconds(exc: Exception, attempt: int) -> int:
+    """Compute retry delay with provider hint + bounded exponential backoff."""
+    base = parse_int_env("GROQ_RETRY_BACKOFF_BASE_SEC", 3)
+    cap = parse_int_env("GROQ_RETRY_BACKOFF_MAX_SEC", 45)
+    exp_wait = min(cap, base * (2 ** max(0, attempt - 1)))
+    hinted = extract_retry_after_seconds(exc)
+    if hinted is not None:
+        # Add 1s safety cushion so we don't retry exactly on the boundary.
+        return min(cap, max(exp_wait, hinted + 1))
+    return exp_wait
+
+
+def run_crew_once(
+    model_name: str,
+    serper_tool,
+    calculator_tool,
+    budget_summary,
+    user_input: dict,
+    max_rpm: int,
+):
+    """Execute one full crew run with a specific Groq model."""
+    logger.info(f"[INIT] Initializing Groq LLM: {model_name}")
+    from agents import get_llm
+
+    llm = get_llm(model_name)
+    logger.info("[INIT] LLM ready ✓")
+
+    logger.info("[INIT] Creating agents...")
+    from agents import create_agents
+
+    researcher, budget_planner, itinerary_designer, validator = create_agents(
+        serper_tool, calculator_tool, budget_summary, llm
+    )
+    logger.info("[INIT] Agents ready ✓")
+
+    logger.info("[INIT] Creating tasks...")
+    from tasks import create_tasks
+
+    tasks = create_tasks(
+        researcher, budget_planner, itinerary_designer, validator, user_input
+    )
+    logger.info(f"[INIT] {len(tasks)} tasks ready ✓")
+
+    crew = Crew(
+        agents=[researcher, budget_planner, itinerary_designer, validator],
+        tasks=tasks,
+        process=Process.sequential,
+        verbose=True,
+        memory=False,
+        max_rpm=max_rpm,
+    )
+
+    start_time = datetime.now()
+    result = crew.kickoff()
+    duration = (datetime.now() - start_time).seconds
+    logger.info(f"[CREW] Completed in {duration}s")
+    return result, duration
+
+
 def main():
     logger.info("="*60)
     logger.info("  AI TRAVEL PLANNER CREW - STARTING")
@@ -238,50 +377,60 @@ def main():
         budget_summary  = BudgetSummaryTool()
         logger.info("[INIT] Tools ready ✓")
 
-        logger.info("[INIT] Initializing Groq LLM...")
-        from agents import get_llm
-        llm = get_llm(os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
-        logger.info("[INIT] LLM ready ✓")
-
-        logger.info("[INIT] Creating agents...")
-        from agents import create_agents
-        researcher, budget_planner, itinerary_designer, validator = \
-            create_agents(serper_tool, calculator_tool, budget_summary, llm)
-        logger.info("[INIT] Agents ready ✓")
-
-        logger.info("[INIT] Creating tasks...")
-        from tasks import create_tasks
-        tasks = create_tasks(
-            researcher, budget_planner,
-            itinerary_designer, validator,
-            user_input
-        )
-        logger.info(f"[INIT] {len(tasks)} tasks ready ✓")
-
-        try:
-            max_rpm = int(os.getenv("CREWAI_MAX_RPM", "10"))
-        except ValueError:
-            max_rpm = 10
-            logger.warning("[INIT] Invalid CREWAI_MAX_RPM, falling back to 10")
-
-        crew = Crew(
-            agents=[researcher, budget_planner, itinerary_designer, validator],
-            tasks=tasks,
-            process=Process.sequential,
-            verbose=True,
-            memory=False,
-            max_rpm=max_rpm
+        max_rpm = parse_int_env("CREWAI_MAX_RPM", 10)
+        retry_per_model = parse_int_env("GROQ_RETRY_PER_MODEL", 2)
+        model_candidates = get_model_candidates()
+        logger.info(
+            f"[INIT] Model candidates: {model_candidates} | retries per model: {retry_per_model}"
         )
 
         print("\n🚀 Starting AI Travel Planner Crew...")
         print("   This may take 3-5 minutes. Watch the agents work!\n")
         print("="*60)
 
-        start_time = datetime.now()
-        result     = crew.kickoff()
-        duration   = (datetime.now() - start_time).seconds
+        result = None
+        duration = 0
+        last_error: Exception | None = None
 
-        logger.info(f"[CREW] Completed in {duration}s")
+        for model_index, model_name in enumerate(model_candidates, start=1):
+            logger.info(f"[RUN] Trying model {model_index}/{len(model_candidates)}: {model_name}")
+            for attempt in range(1, retry_per_model + 1):
+                try:
+                    result, duration = run_crew_once(
+                        model_name=model_name,
+                        serper_tool=serper_tool,
+                        calculator_tool=calculator_tool,
+                        budget_summary=budget_summary,
+                        user_input=user_input,
+                        max_rpm=max_rpm,
+                    )
+                    break
+                except Exception as e:
+                    last_error = e
+                    retryable = is_retryable_model_error(e)
+                    decommissioned = is_model_decommissioned_error(e)
+                    logger.warning(
+                        f"[RUN] Model '{model_name}' failed (attempt {attempt}/{retry_per_model}): {e}"
+                    )
+                    if decommissioned:
+                        logger.warning(
+                            f"[RUN] Model '{model_name}' is decommissioned; skipping further retries for this model."
+                        )
+                        break
+                    if retryable and attempt < retry_per_model:
+                        wait_seconds = compute_retry_wait_seconds(e, attempt)
+                        logger.warning(
+                            f"[RUN] Retrying model '{model_name}' in {wait_seconds}s due to transient provider error"
+                        )
+                        time.sleep(wait_seconds)
+                        continue
+                    break
+            if result is not None:
+                break
+            logger.warning(f"[RUN] Falling back from model '{model_name}' to next candidate")
+
+        if result is None:
+            raise last_error or RuntimeError("Crew execution failed for all configured models")
 
         result_text = str(result)
         output_path = save_output(result_text, user_input)
@@ -305,12 +454,23 @@ def main():
         logger.error(f"[ERROR] {str(e)}", exc_info=True)
         print(f"\n❌ Error: {str(e)}")
         print(f"📋 Check log: {log_filename}")
-        if "SERPER" in str(e).upper():
+        error_text = str(e).upper()
+        retry_after = extract_retry_after_seconds(e)
+        if "TOOL_USE_FAILED" in error_text or "FAILED_GENERATION" in error_text:
+            print("💡 Tip: Groq tool-calling failed after retries and fallbacks.")
+            print("   Set GROQ_MODEL / GROQ_MODEL_FALLBACKS in .env to alternative models.")
+        elif "MODEL_DECOMMISSIONED" in error_text or "DECOMMISSIONED" in error_text:
+            print("💡 Tip: One configured Groq model is decommissioned.")
+            print("   Update GROQ_MODEL / GROQ_MODEL_FALLBACKS in .env to currently supported models.")
+        elif "RATE_LIMIT" in error_text or "RATE LIMIT" in error_text:
+            if retry_after:
+                print(f"💡 Tip: Rate limit hit — wait about {retry_after}s and retry.")
+            else:
+                print("💡 Tip: Rate limit hit — wait 30-60s and retry.")
+        elif "SERPER_API_KEY" in error_text or "[SERPERTOOL ERROR]" in error_text:
             print("💡 Tip: Check your SERPER_API_KEY in .env")
-        elif "GROQ" in str(e).upper():
+        elif "GROQ" in error_text or "LITELLM" in error_text:
             print("💡 Tip: Check your GROQ_API_KEY in .env")
-        elif "rate" in str(e).lower():
-            print("💡 Tip: Rate limit hit — wait 60s and retry.")
         sys.exit(1)
 
 

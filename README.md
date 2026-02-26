@@ -114,5 +114,7 @@ python3 main.py
 |-------|-----|
 | `SERPER_API_KEY not found` | Check `.env` file |
 | `GROQ_API_KEY not found` | Check `.env` file |
-| `Rate limit exceeded` | Wait 60s, reduce `max_rpm` in main.py |
+| `tool_use_failed` / `failed_generation` | App will retry and fallback models; tune `GROQ_MODEL` and `GROQ_MODEL_FALLBACKS` |
+| `model_decommissioned` | Remove deprecated model from `GROQ_MODEL_FALLBACKS` in `.env` |
+| `Rate limit exceeded` | App auto-backs off; if repeated, increase wait/backoff vars in `.env` or lower workload |
 | `ModuleNotFoundError` | Run `source venv/bin/activate` first |
