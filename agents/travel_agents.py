@@ -6,21 +6,21 @@ Defines all 4 required agents for the AI Travel Planner.
 import os
 import logging
 from crewai import Agent
-from langchain_groq import ChatGroq
+
+
+logger = logging.getLogger(__name__)
+
 
 logger = logging.getLogger(__name__)
 
 
 def get_llm(model_name: str = "llama-3.3-70b-versatile"):
-    """Initialize the Groq LLM."""
+    """Initialize the Groq LLM using crewai native LLM string format."""
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise ValueError("GROQ_API_KEY not found in environment variables!")
-    llm = ChatGroq(
-        model=model_name,
-        groq_api_key=api_key,
-        temperature=0.3
-    )
+    os.environ["GROQ_API_KEY"] = api_key
+    llm = f"groq/{model_name}"
     logger.info(f"[LLM] Initialized Groq model: {model_name}")
     return llm
 
