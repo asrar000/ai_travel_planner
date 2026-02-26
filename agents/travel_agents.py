@@ -6,22 +6,22 @@ Defines all 4 required agents for the AI Travel Planner.
 import os
 import logging
 from crewai import Agent
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 
 logger = logging.getLogger(__name__)
 
 
-def get_llm(model_name: str = "gemini-1.5-flash"):
-    """Initialize the Gemini LLM."""
-    api_key = os.getenv("GEMINI_API_KEY")
+def get_llm(model_name: str = "llama-3.3-70b-versatile"):
+    """Initialize the Groq LLM."""
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in environment variables!")
-    llm = ChatGoogleGenerativeAI(
-    model=model_name,
-    google_api_key=api_key,
-    temperature=0.3
-	)
-    logger.info(f"[LLM] Initialized Gemini model: {model_name}")
+        raise ValueError("GROQ_API_KEY not found in environment variables!")
+    llm = ChatGroq(
+        model=model_name,
+        groq_api_key=api_key,
+        temperature=0.3
+    )
+    logger.info(f"[LLM] Initialized Groq model: {model_name}")
     return llm
 
 
