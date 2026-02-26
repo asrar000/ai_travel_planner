@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-02-26T16:45:28.932414",
+  "user_input": {
+    "destination": "Miyazaki Japan",
+    "travel_dates": "May 1-5",
+    "duration_days": 5,
+    "budget": 3000.0,
+    "currency": "USD",
+    "preferences": "Halal Foods"
+  },
+  "output_file": "outputs/travel_plan_Miyazaki_Japan_20260226_164528.md",
+  "fixed_output_file": "outputs/output.md",
+  "log_file": "logs/travel_planner_20260226_164035.log"
+}
