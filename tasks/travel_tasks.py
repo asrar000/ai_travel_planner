@@ -32,200 +32,110 @@ def create_tasks(
     # ── TASK 1: Destination Research ──────────────────────────
     task_research = Task(
         description=f"""
-        Research the travel destination: **{destination}**
-        Travel Dates: {travel_dates}
-        Traveler Preferences: {preferences}
+        Research **{destination}** for dates **{travel_dates}** and preferences **{preferences}**.
 
-        Using the SerperSearch tool, research and compile:
-        1. Destination Overview: description, location, why visit
-        2. Top Attractions (8-10): names, descriptions, visit duration
-        3. Local Culture & Customs: etiquette, dress code
-        4. Best Neighborhoods: where to stay, eat, explore
-        5. Weather & Climate during travel dates
-        6. Practical Info: visa, currency, language, emergency contacts
-        7. Safety: current travel advisories, safe/unsafe areas
-        8. Hidden Gems: lesser-known worthwhile spots
-        9. Food Scene: must-try dishes, restaurant areas
-
-        MANDATORY: Use SerperSearch for EACH query:
+        Use SerperSearch for each query exactly once (no duplicate queries):
         - "{destination} top tourist attractions {travel_dates}"
         - "{destination} travel tips culture customs"
         - "{destination} neighborhoods where to stay"
         - "{destination} travel advisory safety {current_year}"
         - "{destination} local food must try restaurants"
 
-        Format output in clear Markdown with headers.
-        Note any data quality issues found.
+        Return concise Markdown with:
+        1. Destination overview
+        2. Top attractions (8-10)
+        3. Culture/customs
+        4. Best neighborhoods
+        5. Weather for travel dates
+        6. Practical info (visa/currency/language/emergency)
+        7. Safety notes
+        8. Hidden gems (3+)
+        9. Food recommendations
+
+        Include source links and data quality caveats. Keep wording compact.
         """,
         agent=destination_researcher,
         expected_output=f"""
-        A comprehensive Markdown research report for {destination} containing:
-        - Destination overview (2-3 paragraphs)
-        - Numbered list of 8-10 top attractions with descriptions
-        - Cultural notes and practical travel information
-        - Neighborhood guide
-        - Weather information for {travel_dates}
-        - Safety and advisory notes
-        - Food recommendations
-        - At least 3 hidden gems
-        All information sourced from actual Serper web searches.
-        """
+        Markdown research report for {destination} with all nine sections, concise text,
+        source links, and data-quality notes from Serper results.
+        """,
+        context=[]
     )
 
     # ── TASK 2: Budget Planning ────────────────────────────────
     task_budget = Task(
         description=f"""
-        Create a detailed budget breakdown for the trip to **{destination}**.
-        Total Budget: {budget} {currency}
-        Trip Duration: {duration_days} days
-        Travel Dates: {travel_dates}
-        Preferences: {preferences}
+        Create budget plan for **{destination}** ({duration_days} days, {budget} {currency}).
+        Dates: {travel_dates}. Preferences: {preferences}.
 
-        Steps:
-        1. Use SerperSearch to find REAL current prices:
-           - "{destination} hotel accommodation prices {travel_dates}"
-           - "{destination} average food cost per day tourist"
-           - "{destination} transportation costs local transport"
-           - "{destination} tourist activities entry fees prices"
-           - "flight to {destination} approximate cost"
+        Use SerperSearch once per query:
+        - "{destination} hotel accommodation prices {travel_dates}"
+        - "{destination} average food cost per day tourist"
+        - "{destination} transportation costs local transport"
+        - "{destination} tourist activities entry fees prices"
 
-        2. Use BudgetCalculator tool to compute:
-           - Accommodation = nightly rate × {duration_days} nights
-           - Food = daily budget × {duration_days} days
-           - Transport = local transport total
-           - Activities = sum of entry fees + tours
-
-        3. Use BudgetSummary tool to generate the final summary table.
-           Include currency explicitly, e.g. "currency:{currency}, accommodation:..., food:..."
-
-        4. Assess feasibility:
-           - Is {budget} {currency} realistic for {duration_days} days?
-           - Budget tier? (Budget / Mid-range / Luxury)
-           - Adjustments if budget is tight?
-
-        Categories: Accommodation, Food, Local Transport,
-        Activities & Entry Fees, Miscellaneous Buffer (10%).
-
-        IMPORTANT: Do NOT fabricate prices. Use Serper results only.
-        State all assumptions clearly.
+        Use BudgetCalculator for arithmetic and BudgetSummary for final table.
+        Categories: accommodation, food, transport, activities, 10% buffer.
+        Include feasibility assessment and assumptions.
+        Do not fabricate prices.
         """,
         agent=budget_planner,
         expected_output=f"""
-        A detailed budget plan in Markdown containing:
-        - Budget feasibility assessment for {budget} {currency}
-        - Itemized daily costs per category
-        - BudgetSummary tool output (table)
-        - Price sources from Serper searches
-        - Budget tier classification
-        - Money-saving tips for {destination}
-        - Risk flags if budget is insufficient
-        All calculations verified using BudgetCalculator.
-        """
+        Concise Markdown budget plan with category totals, daily estimate, BudgetSummary table,
+        feasibility status, assumptions, and source links.
+        """,
+        context=[]
     )
 
     # ── TASK 3: Itinerary Design ───────────────────────────────
     task_itinerary = Task(
         description=f"""
-        Design a complete day-by-day itinerary for **{destination}**.
-        Duration: {duration_days} days
-        Travel Dates: {travel_dates}
-        Budget: {budget} {currency} total
-        Preferences: {preferences}
+        Design a practical {duration_days}-day itinerary for **{destination}**.
+        Dates: {travel_dates}. Budget: {budget} {currency}. Preferences: {preferences}.
 
-        Use SerperSearch to verify:
+        Use SerperSearch once per query:
         - "{destination} attraction opening hours"
         - "{destination} best day trips from city"
-        - "{destination} walking tour self guided map"
 
-        For EACH of the {duration_days} days provide:
-        - Day theme/focus (e.g., "Day 1: Historical Downtown")
-        - Morning (8AM-12PM): 2-3 activities with times
-        - Afternoon (12PM-6PM): 2-3 activities with times
-        - Evening (6PM-10PM): Dinner + evening activity
-        - Estimated cost for the day
-        - Travel tips for that day
-
-        Rules:
-        - No time conflicts between activities
-        - Geographically logical routing
-        - Respect opening hours
-        - Match budget tier
-        - Day 1 accounts for arrival/check-in
-        - Last day accounts for check-out/departure
-
-        Create exactly {duration_days} days of itinerary.
+        For each day include morning/afternoon/evening plan, estimated cost, and one tip.
+        Ensure no time conflicts, realistic routing, and budget alignment.
+        Day 1 includes arrival/check-in. Final day includes departure.
         """,
         agent=itinerary_designer,
         expected_output=f"""
-        A complete {duration_days}-day itinerary in Markdown with:
-        - Day-by-day schedule (Morning / Afternoon / Evening)
-        - Each activity with duration and cost
-        - Restaurant recommendations for each meal
-        - Daily cost estimate aligned with budget plan
-        - Transportation instructions between locations
-        - Practical tips per day
-        - Total itinerary cost summary
-        Itinerary must be realistic, geographically logical, conflict-free.
-        """
+        Markdown itinerary for exactly {duration_days} days with daily schedule, costs,
+        transport notes, and total estimated cost.
+        """,
+        context=[]
     )
 
     # ── TASK 4: Validation ─────────────────────────────────────
     task_validation = Task(
         description=f"""
-        Validate and finalize the complete travel plan for **{destination}**.
-        Budget: {budget} {currency} | Duration: {duration_days} days
+        Validate and finalize the full plan for **{destination}**.
+        Budget: {budget} {currency}. Duration: {duration_days} days.
 
-        1. Budget Validation:
-           - Use BudgetCalculator: itinerary daily costs × {duration_days} = total?
-           - Does total ≤ {budget} {currency}?
-           - Flag any budget overruns with specific line items.
+        Verify:
+        1. Budget consistency (calculator-checked)
+        2. Itinerary feasibility and timing
+        3. Data consistency across research/budget/itinerary
+        4. Risks (weather, budget, logistics, data confidence)
 
-        2. Itinerary Validation:
-           - Check for time conflicts
-           - Verify geographic feasibility
-           - Confirm opening hours respected
-           - Flag over/under-packed days
-
-        3. Data Consistency:
-           - Destination info matches itinerary locations
-           - Accommodation area matches itinerary start points
-           - Budget tier matches selected activities
-
-        4. Risk Assessment:
-           - Weather risks during {travel_dates}
-           - Budget risks (categories at risk of overspend)
-           - Logistical risks
-           - Information reliability issues
-
-        5. Final Output Assembly — compile COMPLETE plan as:
-           # Travel Plan: {destination}
-           ## Executive Summary
-           ## Destination Overview
-           ## Budget Breakdown (use BudgetSummary tool)
-           ## Day-wise Itinerary (all {duration_days} days)
-           ## Validation Summary
-           ## Risk Factors
-           ## Recommendations
-           ## Assumptions Made
-        """,
-        agent=validation_agent,
-        expected_output=f"""
-        A complete validated travel plan in structured Markdown:
-
+        Compile final Markdown:
         # Travel Plan: {destination}
         ## Executive Summary
         ## Destination Overview
-        ## Budget Breakdown (table)
-        ## Day-wise Itinerary ({duration_days} days)
+        ## Budget Breakdown
+        ## Day-wise Itinerary
         ## Validation Summary
-           - Budget Status: PASS/FAIL with details
-           - Itinerary Status: PASS/FAIL with details
-           - Data Quality assessment
-        ## Risk Factors (with severity levels)
-        ## Recommendations & Tips
+        ## Risk Factors
+        ## Recommendations
         ## Assumptions Made
-
-        Self-contained and ready to share with the traveler.
+        """,
+        agent=validation_agent,
+        expected_output=f"""
+        Final self-contained Markdown travel plan with budget table, full itinerary,
+        validation status, risk levels, recommendations, and assumptions.
         """,
         context=[task_research, task_budget, task_itinerary]
     )

@@ -19,12 +19,12 @@ class SerperSearchTool(BaseTool):
     """
     name: str = "SerperSearch"
     description: str = (
-        "Search the internet for real-time travel information using Serper Dev API. "
-        "Use this to find destination highlights, attractions, accommodation options, "
-        "transport costs, local food prices, and current travel advisories. "
-        "Input should be a specific search query string."
+        "Search web via Serper for current travel information. Input: query string."
     )
     api_key: str = Field(default="")
+    max_results: int = Field(default=3)
+    max_snippet_chars: int = Field(default=180)
+    _cache: dict[str, str] = {}
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -32,10 +32,38 @@ class SerperSearchTool(BaseTool):
         if not self.api_key:
             raise ValueError("SERPER_API_KEY not found in environment variables!")
 
+        # Keep tool outputs compact to reduce LLM token pressure.
+        self.max_results = self._parse_positive_int_env("SERPER_RESULTS_LIMIT", 3, upper=5)
+        self.max_snippet_chars = self._parse_positive_int_env("SERPER_SNIPPET_MAX_CHARS", 180, upper=500)
+
+    @staticmethod
+    def _parse_positive_int_env(name: str, default: int, upper: int) -> int:
+        raw = os.getenv(name, "").strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+            if value <= 0:
+                return default
+            return min(value, upper)
+        except ValueError:
+            return default
+
+    def _compact(self, text: str) -> str:
+        text = " ".join((text or "").split())
+        if len(text) <= self.max_snippet_chars:
+            return text
+        return text[: self.max_snippet_chars - 1].rstrip() + "…"
+
     def _run(self, query: str) -> str:
         """Execute a web search using Serper Dev API."""
         if not query or not query.strip():
             raise ValueError("SerperSearch query must not be empty.")
+
+        query = " ".join(query.split())
+        if query in self._cache:
+            logger.info(f"[SerperTool] Cache hit: {query}")
+            return self._cache[query]
 
         logger.info(f"[SerperTool] Searching: {query}")
 
@@ -44,7 +72,7 @@ class SerperSearchTool(BaseTool):
             "X-API-KEY": self.api_key,
             "Content-Type": "application/json"
         }
-        payload = {"q": query, "num": 5, "gl": "us", "hl": "en"}
+        payload = {"q": query, "num": self.max_results, "gl": "us", "hl": "en"}
 
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=15)
@@ -52,29 +80,22 @@ class SerperSearchTool(BaseTool):
             data = response.json()
 
             results = []
-
-            if "answerBox" in data:
-                ab = data["answerBox"]
-                answer = ab.get("answer") or ab.get("snippet") or ""
-                if answer:
-                    results.append(f"[Direct Answer]: {answer}")
-
-            for i, result in enumerate(data.get("organic", [])[:5], 1):
-                title   = result.get("title", "")
-                snippet = result.get("snippet", "")
-                link    = result.get("link", "")
-                results.append(f"[Result {i}] {title}\n  {snippet}\n  Source: {link}")
-
-            if "knowledgeGraph" in data:
-                desc = data["knowledgeGraph"].get("description", "")
-                if desc:
-                    results.append(f"[Knowledge Graph]: {desc}")
+            for i, result in enumerate(data.get("organic", [])[: self.max_results], 1):
+                title = self._compact(result.get("title", ""))
+                snippet = self._compact(result.get("snippet", ""))
+                link = self._compact(result.get("link", ""))
+                line = f"{i}. {title}"
+                if snippet:
+                    line += f" | {snippet}"
+                if link:
+                    line += f" | Source: {link}"
+                results.append(line)
 
             if not results:
                 return "No search results found."
 
-            output = f"Search Results for: '{query}'\n" + "="*50 + "\n"
-            output += "\n\n".join(results)
+            output = f"Search '{query}'\n" + "\n".join(results)
+            self._cache[query] = output
             logger.info(f"[SerperTool] Got {len(results)} results for: {query}")
             return output
 

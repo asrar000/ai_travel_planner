@@ -117,4 +117,12 @@ python3 main.py
 | `tool_use_failed` / `failed_generation` | App will retry and fallback models; tune `GROQ_MODEL` and `GROQ_MODEL_FALLBACKS` |
 | `model_decommissioned` | Remove deprecated model from `GROQ_MODEL_FALLBACKS` in `.env` |
 | `Rate limit exceeded` | App auto-backs off; if repeated, increase wait/backoff vars in `.env` or lower workload |
+| `Invalid response from LLM call - None or empty` | Retry once; if repeated, lower `CREWAI_MAX_RPM` and keep prompts/tool output compact |
 | `ModuleNotFoundError` | Run `source venv/bin/activate` first |
+
+Recommended rate-limit settings in `.env`:
+- `CREWAI_MAX_RPM=4`
+- `GROQ_RETRY_PER_MODEL=2`
+- `SERPER_RESULTS_LIMIT=3`
+- `SERPER_SNIPPET_MAX_CHARS=180`
+- `GROQ_MAX_COMPLETION_TOKENS=700`

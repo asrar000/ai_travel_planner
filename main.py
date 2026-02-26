@@ -268,6 +268,8 @@ def is_retryable_model_error(exc: Exception) -> bool:
         "rate_limit_exceeded",
         "429",
         "rate limit",
+        "none or empty response",
+        "invalid response from llm call - none or empty",
         "timeout",
         "timed out",
         "connection",
@@ -279,6 +281,11 @@ def is_retryable_model_error(exc: Exception) -> bool:
         "504",
     ]
     return any(marker in message for marker in retry_markers)
+
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "rate_limit_exceeded" in message or "rate limit" in message or "429" in message
 
 
 def is_model_decommissioned_error(exc: Exception) -> bool:
@@ -377,7 +384,7 @@ def main():
         budget_summary  = BudgetSummaryTool()
         logger.info("[INIT] Tools ready ✓")
 
-        max_rpm = parse_int_env("CREWAI_MAX_RPM", 10)
+        max_rpm = parse_int_env("CREWAI_MAX_RPM", 4)
         retry_per_model = parse_int_env("GROQ_RETRY_PER_MODEL", 2)
         model_candidates = get_model_candidates()
         logger.info(
@@ -409,6 +416,7 @@ def main():
                     last_error = e
                     retryable = is_retryable_model_error(e)
                     decommissioned = is_model_decommissioned_error(e)
+                    rate_limited = is_rate_limit_error(e)
                     logger.warning(
                         f"[RUN] Model '{model_name}' failed (attempt {attempt}/{retry_per_model}): {e}"
                     )
@@ -424,6 +432,12 @@ def main():
                         )
                         time.sleep(wait_seconds)
                         continue
+                    if rate_limited and model_index < len(model_candidates):
+                        wait_seconds = compute_retry_wait_seconds(e, attempt)
+                        logger.warning(
+                            f"[RUN] Cooling down {wait_seconds}s before trying fallback model."
+                        )
+                        time.sleep(wait_seconds)
                     break
             if result is not None:
                 break
@@ -467,6 +481,9 @@ def main():
                 print(f"💡 Tip: Rate limit hit — wait about {retry_after}s and retry.")
             else:
                 print("💡 Tip: Rate limit hit — wait 30-60s and retry.")
+            print("   If this repeats, reduce CREWAI_MAX_RPM and keep prompts/tool output concise.")
+        elif "NONE OR EMPTY RESPONSE" in error_text:
+            print("💡 Tip: Model returned empty output. Retry once; if repeated, use lower RPM and shorter prompts.")
         elif "SERPER_API_KEY" in error_text or "[SERPERTOOL ERROR]" in error_text:
             print("💡 Tip: Check your SERPER_API_KEY in .env")
         elif "GROQ" in error_text or "LITELLM" in error_text:
