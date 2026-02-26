@@ -138,7 +138,7 @@ def main():
 
         logger.info("[INIT] Initializing Gemini LLM...")
         from agents import get_llm
-        llm = get_llm(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
+        llm = get_llm(os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
         logger.info("[INIT] LLM ready ✓")
 
         logger.info("[INIT] Creating agents...")
