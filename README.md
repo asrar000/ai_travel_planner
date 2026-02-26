@@ -1,6 +1,6 @@
 # 🌍 AI Travel Planner Crew
 
-Multi-agent AI travel planning system using **CrewAI** + **Serper Dev API** + **Google Gemini Free API**.
+Multi-agent AI travel planning system using **CrewAI** + **Serper Dev API** + **Groq API**.
 
 ## Architecture
 
@@ -87,7 +87,7 @@ python3 main.py
 | API | URL | Free Tier |
 |-----|-----|-----------|
 | Serper Dev | https://serper.dev | 2,500 searches/month |
-| Google Gemini | https://aistudio.google.com/app/apikey | Free |
+| Groq | https://console.groq.com/keys | Free tier available |
 
 ## Agents Summary
 
@@ -113,6 +113,6 @@ python3 main.py
 | Error | Fix |
 |-------|-----|
 | `SERPER_API_KEY not found` | Check `.env` file |
-| `GEMINI_API_KEY not found` | Check `.env` file |
+| `GROQ_API_KEY not found` | Check `.env` file |
 | `Rate limit exceeded` | Wait 60s, reduce `max_rpm` in main.py |
 | `ModuleNotFoundError` | Run `source venv/bin/activate` first |

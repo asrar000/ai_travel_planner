@@ -34,6 +34,9 @@ class SerperSearchTool(BaseTool):
 
     def _run(self, query: str) -> str:
         """Execute a web search using Serper Dev API."""
+        if not query or not query.strip():
+            raise ValueError("SerperSearch query must not be empty.")
+
         logger.info(f"[SerperTool] Searching: {query}")
 
         url = "https://google.serper.dev/search"
@@ -78,12 +81,12 @@ class SerperSearchTool(BaseTool):
         except requests.exceptions.Timeout:
             msg = f"[SerperTool ERROR] Request timed out for query: {query}"
             logger.error(msg)
-            return msg
+            raise RuntimeError(msg)
         except requests.exceptions.HTTPError as e:
             msg = f"[SerperTool ERROR] HTTP {e.response.status_code}: {e.response.text}"
             logger.error(msg)
-            return msg
+            raise RuntimeError(msg)
         except Exception as e:
             msg = f"[SerperTool ERROR] Unexpected error: {str(e)}"
             logger.error(msg)
-            return msg
+            raise RuntimeError(msg)

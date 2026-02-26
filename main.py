@@ -9,7 +9,7 @@ import re
 import sys
 import json
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from crewai import Crew, Process
@@ -52,13 +52,70 @@ def validate_env():
 
 
 def calculate_duration(travel_dates: str) -> int:
-    """Auto-calculate trip duration from travel date string."""
-    numbers = re.findall(r'\b(\d+)\b', travel_dates)
-    if len(numbers) >= 2:
-        diff = abs(int(numbers[1]) - int(numbers[0]))
-        if 1 <= diff <= 30:
-            return diff + 1
-    return 7  # default fallback
+    """Calculate trip duration from common date-range formats."""
+    normalized = re.sub(r"\s+to\s+", " - ", travel_dates, flags=re.IGNORECASE).strip()
+
+    def _duration(start: date, end: date) -> int | None:
+        if end < start:
+            return None
+        days = (end - start).days + 1
+        if 1 <= days <= 60:
+            return days
+        return None
+
+    # Format: YYYY-MM-DD ... YYYY-MM-DD
+    iso_dates = re.findall(r"\b\d{4}-\d{1,2}-\d{1,2}\b", normalized)
+    if len(iso_dates) >= 2:
+        try:
+            start = datetime.strptime(iso_dates[0], "%Y-%m-%d").date()
+            end = datetime.strptime(iso_dates[1], "%Y-%m-%d").date()
+            days = _duration(start, end)
+            if days:
+                return days
+        except ValueError:
+            pass
+
+    # Format: Month DD-DD, YYYY or Month DD-Month DD, YYYY
+    month_pattern = re.search(
+        r"(?P<m1>[A-Za-z]+)\s+(?P<d1>\d{1,2})\s*[-–]\s*"
+        r"(?:(?P<m2>[A-Za-z]+)\s+)?(?P<d2>\d{1,2})(?:,\s*(?P<y>\d{4}))?",
+        normalized,
+    )
+    if month_pattern:
+        try:
+            month_1 = datetime.strptime(month_pattern.group("m1"), "%B").month
+        except ValueError:
+            try:
+                month_1 = datetime.strptime(month_pattern.group("m1"), "%b").month
+            except ValueError:
+                month_1 = None
+
+        month_2_text = month_pattern.group("m2") or month_pattern.group("m1")
+        try:
+            month_2 = datetime.strptime(month_2_text, "%B").month
+        except ValueError:
+            try:
+                month_2 = datetime.strptime(month_2_text, "%b").month
+            except ValueError:
+                month_2 = None
+
+        if month_1 and month_2:
+            year = int(month_pattern.group("y") or datetime.now().year)
+            day_1 = int(month_pattern.group("d1"))
+            day_2 = int(month_pattern.group("d2"))
+            try:
+                start = date(year, month_1, day_1)
+                end = date(year, month_2, day_2)
+                if end < start and month_pattern.group("m2"):
+                    end = date(year + 1, month_2, day_2)
+                days = _duration(start, end)
+                if days:
+                    return days
+            except ValueError:
+                pass
+
+    # Fallback: could not parse confidently
+    return 0
 
 
 def get_user_input() -> dict:
@@ -75,11 +132,26 @@ def get_user_input() -> dict:
     if not travel_dates:
         travel_dates = "March 15-22, 2025"
 
+    # Auto-calculate duration from travel dates (fallback to manual if needed)
+    duration_days = calculate_duration(travel_dates)
+    if duration_days <= 0:
+        try:
+            duration_days = int(input("⏱️  Duration in days (e.g., 7): ").strip())
+        except ValueError:
+            duration_days = 7
+            print("   Could not parse dates; using default duration: 7 days")
+    if duration_days <= 0:
+        duration_days = 7
+        print("   Duration must be positive; using default: 7 days")
+
     try:
         budget = float(input("💰 Total budget (numeric, e.g., 2000): ").strip())
     except ValueError:
         budget = 2000
         print("   Using default: $2000")
+    if budget <= 0:
+        budget = 2000
+        print("   Budget must be positive; using default: $2000")
 
     currency = input("💱 Currency (e.g., USD, EUR, GBP) [default: USD]: ").strip().upper()
     if not currency:
@@ -88,9 +160,6 @@ def get_user_input() -> dict:
     preferences = input("🎯 Preferences (optional, e.g., history, food, adventure): ").strip()
     if not preferences:
         preferences = "general sightseeing"
-
-    # Auto-calculate duration from travel dates
-    duration_days = calculate_duration(travel_dates)
 
     user_input = {
         "destination": destination,
@@ -104,7 +173,7 @@ def get_user_input() -> dict:
     print("\n📋 Trip Summary:")
     print(f"   Destination  : {destination}")
     print(f"   Dates        : {travel_dates}")
-    print(f"   Duration     : {duration_days} days (auto-calculated)")
+    print(f"   Duration     : {duration_days} days")
     print(f"   Budget       : {budget} {currency}")
     print(f"   Preferences  : {preferences}")
     print()
@@ -115,7 +184,9 @@ def save_output(result: str, user_input: dict):
     outputs_dir = Path("outputs")
     outputs_dir.mkdir(exist_ok=True)
 
-    dest_safe  = user_input["destination"].replace(" ", "_").replace(",", "")
+    dest_safe = re.sub(r"[^A-Za-z0-9._-]+", "_", user_input["destination"]).strip("._")
+    if not dest_safe:
+        dest_safe = "destination"
     timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
     md_path    = outputs_dir / f"travel_plan_{dest_safe}_{timestamp}.md"
     json_path  = outputs_dir / f"travel_plan_{dest_safe}_{timestamp}.json"
@@ -145,11 +216,11 @@ def main():
     logger.info("  AI TRAVEL PLANNER CREW - STARTING")
     logger.info("="*60)
 
-    validate_env()
-    user_input = get_user_input()
-    logger.info(f"[Input] {json.dumps(user_input, indent=2)}")
-
     try:
+        validate_env()
+        user_input = get_user_input()
+        logger.info(f"[Input] {json.dumps(user_input, indent=2)}")
+
         logger.info("[INIT] Initializing tools...")
         from tools import SerperSearchTool, BudgetCalculatorTool, BudgetSummaryTool
         serper_tool     = SerperSearchTool()
@@ -177,13 +248,19 @@ def main():
         )
         logger.info(f"[INIT] {len(tasks)} tasks ready ✓")
 
+        try:
+            max_rpm = int(os.getenv("CREWAI_MAX_RPM", "10"))
+        except ValueError:
+            max_rpm = 10
+            logger.warning("[INIT] Invalid CREWAI_MAX_RPM, falling back to 10")
+
         crew = Crew(
             agents=[researcher, budget_planner, itinerary_designer, validator],
             tasks=tasks,
             process=Process.sequential,
             verbose=True,
             memory=False,
-            max_rpm=int(os.getenv("CREWAI_MAX_RPM", "10"))
+            max_rpm=max_rpm
         )
 
         print("\n🚀 Starting AI Travel Planner Crew...")

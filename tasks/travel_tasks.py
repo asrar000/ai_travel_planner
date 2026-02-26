@@ -4,6 +4,7 @@ Defines all tasks assigned to the travel planning agents.
 """
 
 import logging
+from datetime import datetime
 from crewai import Task
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ def create_tasks(
     currency      = user_input.get("currency", "USD")
     preferences   = user_input.get("preferences", "No specific preferences")
     duration_days = user_input.get("duration_days", 5)
+    current_year = datetime.now().year
 
     logger.info(f"[Tasks] Creating tasks for: {destination} | {travel_dates} | {budget} {currency}")
 
@@ -49,7 +51,7 @@ def create_tasks(
         - "{destination} top tourist attractions {travel_dates}"
         - "{destination} travel tips culture customs"
         - "{destination} neighborhoods where to stay"
-        - "{destination} travel advisory safety 2024"
+        - "{destination} travel advisory safety {current_year}"
         - "{destination} local food must try restaurants"
 
         Format output in clear Markdown with headers.
@@ -94,6 +96,7 @@ def create_tasks(
            - Activities = sum of entry fees + tours
 
         3. Use BudgetSummary tool to generate the final summary table.
+           Include currency explicitly, e.g. "currency:{currency}, accommodation:..., food:..."
 
         4. Assess feasibility:
            - Is {budget} {currency} realistic for {duration_days} days?
