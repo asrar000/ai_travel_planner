@@ -1,10 +1,11 @@
 """
 main.py
 AI Travel Planner Crew - Main Entry Point
-Multi-agent system: CrewAI + Gemini Free API + Serper Dev API
+Multi-agent system: CrewAI + Groq + Serper Dev API
 """
 
 import os
+import re
 import sys
 import json
 import logging
@@ -37,8 +38,8 @@ def validate_env():
     missing = []
     if not os.getenv("SERPER_API_KEY"):
         missing.append("SERPER_API_KEY")
-    if not os.getenv("GEMINI_API_KEY"):
-        missing.append("GEMINI_API_KEY")
+    if not os.getenv("GROQ_API_KEY"):
+        missing.append("GROQ_API_KEY")
     if missing:
         logger.error(f"Missing environment variables: {missing}")
         print("\n❌ ERROR: Missing API keys!")
@@ -50,20 +51,29 @@ def validate_env():
     logger.info("[ENV] All required API keys found ✓")
 
 
+def calculate_duration(travel_dates: str) -> int:
+    """Auto-calculate trip duration from travel date string."""
+    numbers = re.findall(r'\b(\d+)\b', travel_dates)
+    if len(numbers) >= 2:
+        diff = abs(int(numbers[1]) - int(numbers[0]))
+        if 1 <= diff <= 30:
+            return diff + 1
+    return 7  # default fallback
+
+
 def get_user_input() -> dict:
     print("\n" + "="*60)
     print("  🌍  AI TRAVEL PLANNER CREW  🌍")
-    print("  Powered by CrewAI + Gemini + Serper")
+    print("  Powered by CrewAI + Groq + Serper")
     print("="*60 + "\n")
 
-    destination = input("📍 Destination (e.g., Tokyo, Japan): ").strip() or "Tokyo, Japan"
-    travel_dates = input("📅 Travel Dates (e.g., March 15-22, 2025): ").strip() or "March 15-22, 2025"
+    destination = input("📍 Destination (e.g., Tokyo, Japan): ").strip()
+    if not destination:
+        destination = "Tokyo, Japan"
 
-    try:
-        duration_days = int(input("⏱️  Duration in days (e.g., 7): ").strip())
-    except ValueError:
-        duration_days = 7
-        print("   Using default: 7 days")
+    travel_dates = input("📅 Travel Dates (e.g., March 15-22, 2025): ").strip()
+    if not travel_dates:
+        travel_dates = "March 15-22, 2025"
 
     try:
         budget = float(input("💰 Total budget (numeric, e.g., 2000): ").strip())
@@ -71,8 +81,16 @@ def get_user_input() -> dict:
         budget = 2000
         print("   Using default: $2000")
 
-    currency = input("💱 Currency (e.g., USD, EUR, GBP) [default: USD]: ").strip().upper() or "USD"
-    preferences = input("🎯 Preferences (e.g., history, food, adventure): ").strip() or "culture, food, sightseeing"
+    currency = input("💱 Currency (e.g., USD, EUR, GBP) [default: USD]: ").strip().upper()
+    if not currency:
+        currency = "USD"
+
+    preferences = input("🎯 Preferences (optional, e.g., history, food, adventure): ").strip()
+    if not preferences:
+        preferences = "general sightseeing"
+
+    # Auto-calculate duration from travel dates
+    duration_days = calculate_duration(travel_dates)
 
     user_input = {
         "destination": destination,
@@ -84,8 +102,11 @@ def get_user_input() -> dict:
     }
 
     print("\n📋 Trip Summary:")
-    for k, v in user_input.items():
-        print(f"   {k:<15} : {v}")
+    print(f"   Destination  : {destination}")
+    print(f"   Dates        : {travel_dates}")
+    print(f"   Duration     : {duration_days} days (auto-calculated)")
+    print(f"   Budget       : {budget} {currency}")
+    print(f"   Preferences  : {preferences}")
     print()
     return user_input
 
@@ -131,12 +152,12 @@ def main():
     try:
         logger.info("[INIT] Initializing tools...")
         from tools import SerperSearchTool, BudgetCalculatorTool, BudgetSummaryTool
-        serper_tool       = SerperSearchTool()
-        calculator_tool   = BudgetCalculatorTool()
-        budget_summary    = BudgetSummaryTool()
+        serper_tool     = SerperSearchTool()
+        calculator_tool = BudgetCalculatorTool()
+        budget_summary  = BudgetSummaryTool()
         logger.info("[INIT] Tools ready ✓")
 
-        logger.info("[INIT] Initializing Gemini LLM...")
+        logger.info("[INIT] Initializing Groq LLM...")
         from agents import get_llm
         llm = get_llm(os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
         logger.info("[INIT] LLM ready ✓")
@@ -149,7 +170,11 @@ def main():
 
         logger.info("[INIT] Creating tasks...")
         from tasks import create_tasks
-        tasks = create_tasks(researcher, budget_planner, itinerary_designer, validator, user_input)
+        tasks = create_tasks(
+            researcher, budget_planner,
+            itinerary_designer, validator,
+            user_input
+        )
         logger.info(f"[INIT] {len(tasks)} tasks ready ✓")
 
         crew = Crew(
@@ -158,7 +183,7 @@ def main():
             process=Process.sequential,
             verbose=True,
             memory=False,
-            max_rpm=10
+            max_rpm=int(os.getenv("CREWAI_MAX_RPM", "10"))
         )
 
         print("\n🚀 Starting AI Travel Planner Crew...")
@@ -195,8 +220,8 @@ def main():
         print(f"📋 Check log: {log_filename}")
         if "SERPER" in str(e).upper():
             print("💡 Tip: Check your SERPER_API_KEY in .env")
-        elif "GEMINI" in str(e).upper() or "GOOGLE" in str(e).upper():
-            print("💡 Tip: Check your GEMINI_API_KEY in .env")
+        elif "GROQ" in str(e).upper():
+            print("💡 Tip: Check your GROQ_API_KEY in .env")
         elif "rate" in str(e).lower():
             print("💡 Tip: Rate limit hit — wait 60s and retry.")
         sys.exit(1)
