@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-02-27T14:15:10.309630",
+  "user_input": {
+    "destination": "Austria,Vienna",
+    "travel_dates": "March 01 March 05",
+    "duration_days": 5,
+    "budget": 3000.0,
+    "currency": "GBP",
+    "preferences": "Halal Foods,Best places to visit,Cheap Stay"
+  },
+  "output_file": "outputs/travel_plan_Austria_Vienna_20260227_141510.md",
+  "fixed_output_file": "outputs/output.md",
+  "log_file": "logs/travel_planner_20260227_140803.log"
+}
