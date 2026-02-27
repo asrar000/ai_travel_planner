@@ -25,6 +25,9 @@ class SerperSearchTool(BaseTool):
     max_results: int = Field(default=2)
     max_snippet_chars: int = Field(default=120)
     include_snippet: bool = Field(default=False)
+    tool_invocations: int = Field(default=0)
+    api_requests: int = Field(default=0)
+    cache_hits: int = Field(default=0)
     _cache: dict[str, str] = {}
 
     def __init__(self, **kwargs):
@@ -66,11 +69,13 @@ class SerperSearchTool(BaseTool):
 
     def _run(self, query: str) -> str:
         """Execute a web search using Serper Dev API."""
+        self.tool_invocations += 1
         if not query or not query.strip():
             raise ValueError("SerperSearch query must not be empty.")
 
         query = " ".join(query.split())
         if query in self._cache:
+            self.cache_hits += 1
             logger.info(f"[SerperTool] Cache hit: {query}")
             return self._cache[query]
 
@@ -84,6 +89,7 @@ class SerperSearchTool(BaseTool):
         payload = {"q": query, "num": self.max_results, "gl": "us", "hl": "en"}
 
         try:
+            self.api_requests += 1
             response = requests.post(url, headers=headers, json=payload, timeout=15)
             response.raise_for_status()
             data = response.json()

@@ -85,6 +85,95 @@ def _format_money(amount: float, currency: str) -> str:
     return f"{amount:,.2f} {currency}"
 
 
+def _format_int(value: int) -> str:
+    return f"{int(value):,}"
+
+
+def _empty_llm_usage_totals() -> dict[str, int]:
+    return {
+        "successful_requests": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cached_prompt_tokens": 0,
+    }
+
+
+def _merge_llm_usage_totals(totals: dict[str, int], usage: dict | None) -> None:
+    if not usage:
+        return
+    for key in ("successful_requests", "prompt_tokens", "completion_tokens", "total_tokens", "cached_prompt_tokens"):
+        raw_value = usage.get(key, 0) if isinstance(usage, dict) else getattr(usage, key, 0)
+        try:
+            totals[key] += int(raw_value or 0)
+        except (TypeError, ValueError):
+            continue
+
+
+def _build_usage_summary(llm_totals: dict[str, int], serper_tool) -> dict[str, float | int]:
+    llm_api_calls = int(llm_totals.get("successful_requests", 0))
+    prompt_tokens = int(llm_totals.get("prompt_tokens", 0))
+    completion_tokens = int(llm_totals.get("completion_tokens", 0))
+    total_tokens = int(llm_totals.get("total_tokens", 0))
+    cached_prompt_tokens = int(llm_totals.get("cached_prompt_tokens", 0))
+
+    serper_api_calls = int(getattr(serper_tool, "api_requests", 0))
+    serper_cache_hits = int(getattr(serper_tool, "cache_hits", 0))
+    serper_invocations = int(getattr(serper_tool, "tool_invocations", 0))
+    total_api_calls = llm_api_calls + serper_api_calls
+
+    avg_tokens_per_llm_call = (total_tokens / llm_api_calls) if llm_api_calls > 0 else 0.0
+    avg_tokens_per_api_call = (total_tokens / total_api_calls) if total_api_calls > 0 else 0.0
+
+    return {
+        "llm_api_calls": llm_api_calls,
+        "serper_api_calls": serper_api_calls,
+        "total_api_calls": total_api_calls,
+        "serper_tool_invocations": serper_invocations,
+        "serper_cache_hits": serper_cache_hits,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "cached_prompt_tokens": cached_prompt_tokens,
+        "total_tokens": total_tokens,
+        "avg_tokens_per_llm_call": round(avg_tokens_per_llm_call, 2),
+        "avg_tokens_per_api_call": round(avg_tokens_per_api_call, 2),
+    }
+
+
+def _usage_markdown_table(usage_summary: dict[str, float | int]) -> str:
+    rows = [
+        ("LLM API Calls", _format_int(int(usage_summary["llm_api_calls"]))),
+        ("Serper API Calls", _format_int(int(usage_summary["serper_api_calls"]))),
+        ("Total API Calls", _format_int(int(usage_summary["total_api_calls"]))),
+        ("Prompt Tokens", _format_int(int(usage_summary["prompt_tokens"]))),
+        ("Completion Tokens", _format_int(int(usage_summary["completion_tokens"]))),
+        ("Cached Prompt Tokens", _format_int(int(usage_summary["cached_prompt_tokens"]))),
+        ("Total Tokens", _format_int(int(usage_summary["total_tokens"]))),
+        ("Avg Tokens / LLM API Call", f"{float(usage_summary['avg_tokens_per_llm_call']):,.2f}"),
+        ("Avg Tokens / API Call (Overall)", f"{float(usage_summary['avg_tokens_per_api_call']):,.2f}"),
+    ]
+
+    lines = ["## API Usage Summary", "", "| Metric | Value |", "|---|---:|"]
+    for label, value in rows:
+        lines.append(f"| {label} | {value} |")
+    return "\n".join(lines)
+
+
+def _print_usage_summary(usage_summary: dict[str, float | int]) -> None:
+    print("\n📊 API Usage Summary")
+    print("| Metric | Value |")
+    print("|---|---:|")
+    print(f"| LLM API Calls | {_format_int(int(usage_summary['llm_api_calls']))} |")
+    print(f"| Serper API Calls | {_format_int(int(usage_summary['serper_api_calls']))} |")
+    print(f"| Total API Calls | {_format_int(int(usage_summary['total_api_calls']))} |")
+    print(f"| Prompt Tokens | {_format_int(int(usage_summary['prompt_tokens']))} |")
+    print(f"| Completion Tokens | {_format_int(int(usage_summary['completion_tokens']))} |")
+    print(f"| Cached Prompt Tokens | {_format_int(int(usage_summary['cached_prompt_tokens']))} |")
+    print(f"| Total Tokens | {_format_int(int(usage_summary['total_tokens']))} |")
+    print(f"| Avg Tokens / LLM API Call | {float(usage_summary['avg_tokens_per_llm_call']):,.2f} |")
+    print(f"| Avg Tokens / API Call (Overall) | {float(usage_summary['avg_tokens_per_api_call']):,.2f} |")
+
+
 def _clean_line(line: str) -> str:
     return re.sub(r"\s+", " ", (line or "").strip())
 
@@ -613,7 +702,7 @@ def get_user_input() -> dict:
     return user_input
 
 
-def save_output(result: str, user_input: dict):
+def save_output(result: str, user_input: dict, usage_summary: dict[str, float | int] | None = None):
     outputs_dir = Path("outputs")
     outputs_dir.mkdir(exist_ok=True)
 
@@ -627,6 +716,7 @@ def save_output(result: str, user_input: dict):
     # ── Build full Markdown output ─────────────────────────────
     budget_value = float(user_input.get("budget", 0.0) or 0.0)
     currency = user_input.get("currency", "USD")
+    usage_block = _usage_markdown_table(usage_summary) if usage_summary else ""
     md_content = f"""# AI Travel Plan: {user_input['destination']}
 
 | Field | Details |
@@ -641,6 +731,8 @@ def save_output(result: str, user_input: dict):
 ---
 
 {result}
+
+{usage_block}
 
 ---
 *Generated by AI Travel Planner Crew — CrewAI + Groq + Serper*
@@ -658,6 +750,7 @@ def save_output(result: str, user_input: dict):
         json.dump({
             "generated_at": datetime.now().isoformat(),
             "user_input": user_input,
+            "usage_summary": usage_summary or {},
             "output_file": str(md_path),
             "fixed_output_file": str(fixed_md_path),
             "log_file": str(log_filename)
@@ -845,10 +938,18 @@ def run_crew_once(
     )
 
     start_time = datetime.now()
-    result     = crew.kickoff()
-    duration   = (datetime.now() - start_time).seconds
-    logger.info(f"[CREW] Completed in {duration}s")
-    return result, duration
+    try:
+        result = crew.kickoff()
+        duration = (datetime.now() - start_time).seconds
+        logger.info(f"[CREW] Completed in {duration}s")
+        usage_summary = llm.get_token_usage_summary().model_dump()
+        return result, duration, usage_summary
+    except Exception as e:
+        try:
+            setattr(e, "_llm_usage", llm.get_token_usage_summary().model_dump())
+        except Exception:
+            pass
+        raise
 
 
 def main():
@@ -883,6 +984,7 @@ def main():
         result     = None
         duration   = 0
         last_error: Exception | None = None
+        llm_usage_totals = _empty_llm_usage_totals()
 
         for model_index, model_name in enumerate(model_candidates, start=1):
             skip_model = False
@@ -894,7 +996,7 @@ def main():
                 )
                 for attempt in range(1, retry_per_model + 1):
                     try:
-                        result, duration = run_crew_once(
+                        result, duration, run_llm_usage = run_crew_once(
                             model_name=model_name,
                             api_key=api_key,
                             serper_tool=serper_tool,
@@ -903,9 +1005,11 @@ def main():
                             user_input=user_input,
                             max_rpm=max_rpm,
                         )
+                        _merge_llm_usage_totals(llm_usage_totals, run_llm_usage)
                         break
 
                     except Exception as e:
+                        _merge_llm_usage_totals(llm_usage_totals, getattr(e, "_llm_usage", None))
                         last_error     = e
                         retryable      = is_retryable_model_error(e)
                         decommissioned = is_model_decommissioned_error(e)
@@ -978,7 +1082,8 @@ def main():
 
         raw_result_text = str(result)
         result_text = compile_report(raw_result_text, user_input)
-        output_path, fixed_path = save_output(result_text, user_input)
+        usage_summary = _build_usage_summary(llm_usage_totals, serper_tool)
+        output_path, fixed_path = save_output(result_text, user_input, usage_summary=usage_summary)
 
         print("\n" + "="*60)
         print("✅ TRAVEL PLAN GENERATED SUCCESSFULLY!")
@@ -987,8 +1092,10 @@ def main():
         print(f"📄 Fixed output  : {fixed_path}")
         print(f"📋 Log file      : {log_filename}")
         print(f"⏱️  Duration      : {duration} seconds")
+        _print_usage_summary(usage_summary)
         print("\n" + "="*60)
         print(result_text)
+        logger.info(f"[USAGE] {json.dumps(usage_summary)}")
         return result_text
 
     except KeyboardInterrupt:

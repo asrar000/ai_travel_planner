@@ -1,0 +1,27 @@
+{
+  "generated_at": "2026-02-27T16:21:34.618881",
+  "user_input": {
+    "destination": "Brussles,Belgium",
+    "travel_dates": "December 05-15",
+    "duration_days": 11,
+    "budget": 4000.0,
+    "currency": "USD",
+    "preferences": "Halal Foods,Cheap Stays,Best places to visit"
+  },
+  "usage_summary": {
+    "llm_api_calls": 14,
+    "serper_api_calls": 6,
+    "total_api_calls": 20,
+    "serper_tool_invocations": 6,
+    "serper_cache_hits": 0,
+    "prompt_tokens": 18740,
+    "completion_tokens": 5867,
+    "cached_prompt_tokens": 0,
+    "total_tokens": 24607,
+    "avg_tokens_per_llm_call": 1757.64,
+    "avg_tokens_per_api_call": 1230.35
+  },
+  "output_file": "outputs/travel_plan_Brussles_Belgium_20260227_162134.md",
+  "fixed_output_file": "outputs/output.md",
+  "log_file": "logs/travel_planner_20260227_161447.log"
+}
