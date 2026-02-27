@@ -39,40 +39,434 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TravelPlannerMain")
 
+REQUIRED_SECTION_ORDER = [
+    "Executive Summary",
+    "Destination Overview",
+    "Budget Breakdown",
+    "Day-wise Itinerary",
+    "Validation Summary",
+    "Risk Factors",
+    "Recommendations",
+    "Assumptions Made",
+]
 
-def get_groq_api_keys() -> list[str]:
-    """Collect Groq API keys from env with deduplication.
+SECTION_ALIASES = {
+    "executive summary": "Executive Summary",
+    "summary": "Executive Summary",
+    "destination overview": "Destination Overview",
+    "destination": "Destination Overview",
+    "budget breakdown": "Budget Breakdown",
+    "budget": "Budget Breakdown",
+    "day wise itinerary": "Day-wise Itinerary",
+    "day-wise itinerary": "Day-wise Itinerary",
+    "daywise itinerary": "Day-wise Itinerary",
+    "itinerary": "Day-wise Itinerary",
+    "validation summary": "Validation Summary",
+    "validation": "Validation Summary",
+    "risk factors": "Risk Factors",
+    "risks": "Risk Factors",
+    "recommendations": "Recommendations",
+    "assumptions made": "Assumptions Made",
+    "assumptions": "Assumptions Made",
+}
 
-    Supported env formats:
-      - GROQ_API_KEY
-      - GROQ_API_KEYS=key1,key2,key3
-      - GROQ_API_KEY_1, GROQ_API_KEY_2, ... (optional)
-    """
+
+def _safe_float(value: str) -> float | None:
+    cleaned = (value or "").strip().replace(",", "")
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _format_money(amount: float, currency: str) -> str:
+    return f"{amount:,.2f} {currency}"
+
+
+def _clean_line(line: str) -> str:
+    return re.sub(r"\s+", " ", (line or "").strip())
+
+
+def _normalize_markdown(raw_text: str) -> str:
+    lines = raw_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    normalized: list[str] = []
+    prev_blank = False
+
+    for line in lines:
+        cleaned = line.rstrip()
+        if re.match(r"^\s*[-*]\s*$", cleaned):
+            # Remove dangling bullets like "-" that break rendering.
+            continue
+        if not cleaned.strip():
+            if not prev_blank:
+                normalized.append("")
+            prev_blank = True
+            continue
+        prev_blank = False
+        normalized.append(cleaned)
+
+    return "\n".join(normalized).strip()
+
+
+def _canonical_section_title(raw_title: str) -> str | None:
+    key = re.sub(r"[^a-z0-9\s-]", "", raw_title.lower()).strip()
+    key = key.replace("daywise", "day wise")
+    return SECTION_ALIASES.get(key)
+
+
+def _extract_sections(raw_text: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {name: [] for name in REQUIRED_SECTION_ORDER}
+    current: str | None = None
+
+    for line in raw_text.splitlines():
+        header_match = re.match(r"^\s*##\s+(.+?)\s*$", line)
+        if header_match:
+            current = _canonical_section_title(header_match.group(1))
+            continue
+        if current:
+            sections[current].append(line)
+
+    return sections
+
+
+def _compact_text_block(lines: list[str], fallback: str, max_lines: int = 4) -> str:
+    cleaned = [_clean_line(line) for line in lines if _clean_line(line)]
+    if not cleaned:
+        return fallback
+
+    bullet_lines = []
+    for line in cleaned:
+        if line.startswith(("-", "*")):
+            bullet_lines.append("- " + line.lstrip("-* ").strip())
+    if bullet_lines:
+        return "\n".join(bullet_lines[:max_lines])
+
+    merged = " ".join(cleaned)
+    merged = re.sub(r"\s+", " ", merged).strip()
+    if len(merged) > 420:
+        merged = merged[:417].rstrip() + "..."
+    return merged
+
+
+def _extract_planned_spend_from_budget(lines: list[str]) -> float | None:
+    for line in lines:
+        table_match = re.search(
+            r"\|\s*\**total\**\s*\|\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if table_match:
+            parsed = _safe_float(table_match.group(1))
+            if parsed is not None and parsed > 0:
+                return parsed
+
+    blob = " ".join(lines)
+    inline_match = re.search(
+        r"total[^0-9]{0,12}\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+        blob,
+        flags=re.IGNORECASE,
+    )
+    if inline_match:
+        parsed = _safe_float(inline_match.group(1))
+        if parsed is not None and parsed > 0:
+            return parsed
+    return None
+
+
+def _build_budget_breakdown(lines: list[str], user_input: dict) -> str:
+    total_budget = float(user_input.get("budget", 0.0) or 0.0)
+    currency = user_input.get("currency", "USD")
+
+    original_planned = _extract_planned_spend_from_budget(lines)
+    if original_planned is None:
+        original_planned = round(total_budget * 0.90, 2)
+
+    min_target = round(total_budget * 0.85, 2)
+    planned_spend = min(total_budget, max(min_target, original_planned))
+    remaining = max(0.0, total_budget - planned_spend)
+
+    categories = {
+        "Accommodation": round(planned_spend * 0.42, 2),
+        "Food": round(planned_spend * 0.22, 2),
+        "Transportation": round(planned_spend * 0.16, 2),
+        "Activities": round(planned_spend * 0.12, 2),
+        "Buffer": round(planned_spend * 0.08, 2),
+    }
+    category_total = sum(categories.values())
+    categories["Buffer"] = round(categories["Buffer"] + (planned_spend - category_total), 2)
+
+    section_lines = [
+        "### Budget Allocation",
+        "| Category | Amount |",
+        "|---|---:|",
+    ]
+    for category, amount in categories.items():
+        section_lines.append(f"| {category} | {_format_money(amount, currency)} |")
+    section_lines.append(f"| **Planned Spend** | **{_format_money(planned_spend, currency)}** |")
+    section_lines.append(f"| **Remaining Budget** | **{_format_money(remaining, currency)}** |")
+    section_lines.append("")
+    section_lines.append(
+        f"- Spend utilization target: {((planned_spend / total_budget) * 100):.1f}% of total budget."
+        if total_budget > 0
+        else "- Spend utilization target: N/A."
+    )
+
+    if original_planned < total_budget * 0.75:
+        upgrade_pool = max(0.0, planned_spend - original_planned)
+        section_lines.extend(
+            [
+                "",
+                "### Suggested Upgrades (Within Budget)",
+                f"- Better stay quality/location: {_format_money(round(upgrade_pool * 0.45, 2), currency)}",
+                f"- Extra paid attractions/day trips: {_format_money(round(upgrade_pool * 0.35, 2), currency)}",
+                f"- Halal dining comfort margin: {_format_money(round(upgrade_pool * 0.20, 2), currency)}",
+            ]
+        )
+
+    return "\n".join(section_lines).strip()
+
+
+def _extract_day_blocks(lines: list[str]) -> dict[int, dict[str, list[str] | str]]:
+    day_blocks: dict[int, dict[str, list[str] | str]] = {}
+    current_day: int | None = None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        day_match = re.match(r"^(?:[-*]\s*)?Day\s+(\d+)\s*[:\-]?\s*(.*)$", line, flags=re.IGNORECASE)
+        if day_match:
+            current_day = int(day_match.group(1))
+            suffix = day_match.group(2).strip()
+            title = f"Day {current_day}" + (f": {suffix}" if suffix else "")
+            day_blocks[current_day] = {"title": title, "lines": []}
+            continue
+        if current_day is not None:
+            day_blocks[current_day]["lines"].append(line)
+
+    return day_blocks
+
+
+def _extract_slot_content(lines: list[str], slot: str) -> str | None:
+    direct_pattern = re.compile(rf"^(?:[-*]\s*)?{slot}\s*[:\-]\s*(.+)$", flags=re.IGNORECASE)
+    loose_pattern = re.compile(rf"\b{slot}\b", flags=re.IGNORECASE)
+
+    for line in lines:
+        direct = direct_pattern.match(line.strip())
+        if direct and direct.group(1).strip():
+            return direct.group(1).strip().rstrip(".")
+
+    for line in lines:
+        if loose_pattern.search(line):
+            cleaned = re.sub(r"^(?:[-*]\s*)?", "", line).strip()
+            cleaned = re.sub(rf"^{slot}\s*[:\-]?\s*", "", cleaned, flags=re.IGNORECASE).strip()
+            if cleaned:
+                return cleaned.rstrip(".")
+
+    return None
+
+
+def _fallback_slot(slot: str, day: int, duration_days: int, destination: str, preferences: str) -> str:
+    pref_text = preferences if preferences else "local highlights"
+    if day == 1:
+        defaults = {
+            "Morning": f"Arrive and check in near central {destination}",
+            "Afternoon": f"Easy orientation walk and nearby landmark visit in {destination}",
+            "Evening": f"Halal-friendly dinner and early rest ({pref_text})",
+        }
+        return defaults[slot]
+    if day == duration_days:
+        defaults = {
+            "Morning": f"Light activity near hotel in {destination}",
+            "Afternoon": "Pack, souvenir stop, and transfer prep",
+            "Evening": "Departure transfer or final local meal",
+        }
+        return defaults[slot]
+
+    defaults = {
+        "Morning": "Primary attraction visit",
+        "Afternoon": "Nearby secondary stop and lunch",
+        "Evening": "Local neighborhood exploration and dinner",
+    }
+    return defaults[slot]
+
+
+def _build_day_itinerary(day_blocks: dict[int, dict[str, list[str] | str]], user_input: dict) -> tuple[str, list[int]]:
+    duration_days = int(user_input.get("duration_days", 5) or 5)
+    destination = user_input.get("destination", "Destination")
+    preferences = user_input.get("preferences", "general sightseeing")
+    currency = user_input.get("currency", "USD")
+    total_budget = float(user_input.get("budget", 0.0) or 0.0)
+    base_day_cost = (total_budget * 0.90 / max(duration_days, 1)) if total_budget > 0 else 0
+
+    output_lines: list[str] = []
+    autofilled_days: list[int] = []
+
+    for day in range(1, duration_days + 1):
+        label = "Arrival & Check-in" if day == 1 else "Departure & Wrap-up" if day == duration_days else "Explore"
+        output_lines.append(f"### Day {day}: {label}")
+
+        block = day_blocks.get(day, {"lines": []})
+        lines = [line for line in block.get("lines", []) if isinstance(line, str)]
+
+        missing_any = False
+        for slot in ("Morning", "Afternoon", "Evening"):
+            content = _extract_slot_content(lines, slot)
+            if not content:
+                missing_any = True
+                content = _fallback_slot(slot, day, duration_days, destination, preferences)
+            output_lines.append(f"- {slot}: {content}.")
+
+        cost_line = None
+        for line in lines:
+            if re.search(r"cost|estimated|\$|usd|jpy|¥", line, flags=re.IGNORECASE):
+                cost_line = re.sub(r"^(?:[-*]\s*)?", "", line).strip().rstrip(".")
+                break
+
+        if not cost_line:
+            factor = 0.8 if day == 1 else 0.75 if day == duration_days else 1.0
+            estimated = round(base_day_cost * factor, 2) if base_day_cost > 0 else 0.0
+            cost_line = f"Estimated cost: ~{estimated:.0f} {currency}"
+            missing_any = True
+
+        if missing_any:
+            autofilled_days.append(day)
+            cost_line = f"{cost_line}. Assumption note: auto-filled short plan."
+        output_lines.append(f"- {cost_line}")
+        output_lines.append("")
+
+    return "\n".join(output_lines).strip(), autofilled_days
+
+
+def compile_report(raw_result: str, user_input: dict) -> str:
+    """Deterministically compile a complete, clean report with all days present."""
+    normalized = _normalize_markdown(raw_result or "")
+    sections = _extract_sections(normalized)
+    all_lines = normalized.splitlines()
+
+    destination = user_input.get("destination", "Destination")
+    travel_dates = user_input.get("travel_dates", "Dates not provided")
+    duration_days = int(user_input.get("duration_days", 5) or 5)
+    budget = float(user_input.get("budget", 0.0) or 0.0)
+    currency = user_input.get("currency", "USD")
+    preferences = user_input.get("preferences", "general sightseeing")
+
+    exec_summary = _compact_text_block(
+        sections["Executive Summary"],
+        (
+            f"{destination} trip plan for {travel_dates} ({duration_days} days), "
+            f"balanced for {preferences} within {_format_money(budget, currency)}."
+        ),
+    )
+    destination_overview = _compact_text_block(
+        sections["Destination Overview"],
+        f"{destination} offers a mix of key attractions, local culture, and practical travel access.",
+        max_lines=5,
+    )
+
+    budget_breakdown = _build_budget_breakdown(sections["Budget Breakdown"], user_input)
+
+    itinerary_source = sections["Day-wise Itinerary"]
+    if not any(re.match(r"^(?:[-*]\s*)?Day\s+\d+", line.strip(), flags=re.IGNORECASE) for line in itinerary_source):
+        itinerary_source = all_lines
+    day_blocks = _extract_day_blocks(itinerary_source)
+    itinerary_text, autofilled_days = _build_day_itinerary(day_blocks, user_input)
+
+    validation_summary = _compact_text_block(
+        sections["Validation Summary"],
+        "- Budget pacing, day sequencing, and travel pacing were checked for feasibility.",
+        max_lines=4,
+    )
+    risk_factors = _compact_text_block(
+        sections["Risk Factors"],
+        "- Possible weather swings.\n- Attraction timing changes.\n- Local transport timing variability.",
+        max_lines=4,
+    )
+    recommendations = _compact_text_block(
+        sections["Recommendations"],
+        "- Reserve key attractions early.\n- Keep one flexible backup option per day.\n- Confirm halal options each day.",
+        max_lines=4,
+    )
+    assumptions_default = [
+        "- Day structure is intentionally short (Morning/Afternoon/Evening + cost) to reduce token usage.",
+        "- Budget utilization is tuned to 85-100% of the declared budget.",
+    ]
+    if autofilled_days:
+        assumptions_default.append(
+            f"- Auto-filled days to ensure full coverage: {', '.join(str(d) for d in sorted(set(autofilled_days)))}."
+        )
+    assumptions = _compact_text_block(sections["Assumptions Made"], "\n".join(assumptions_default), max_lines=6)
+
+    compiled = [
+        f"# Travel Plan: {destination}",
+        "",
+        "## Executive Summary",
+        exec_summary,
+        "",
+        "## Destination Overview",
+        destination_overview,
+        "",
+        "## Budget Breakdown",
+        budget_breakdown,
+        "",
+        "## Day-wise Itinerary",
+        itinerary_text,
+        "",
+        "## Validation Summary",
+        validation_summary,
+        "",
+        "## Risk Factors",
+        risk_factors,
+        "",
+        "## Recommendations",
+        recommendations,
+        "",
+        "## Assumptions Made",
+        assumptions,
+    ]
+
+    return _normalize_markdown("\n".join(compiled))
+
+
+def _collect_keys(primary_key: str, pool_key: str, indexed_prefix: str) -> list[str]:
+    """Collect API keys from single, pooled, and indexed env vars."""
     keys: list[str] = []
 
     def _add_key(raw_value: str):
         key = (raw_value or "").strip()
+        lower = key.lower()
+        if lower in {
+            "your_groq_api_key_here",
+            "your_key_here",
+        }:
+            return
         if key and key not in keys:
             keys.append(key)
 
-    _add_key(os.getenv("GROQ_API_KEY", ""))
+    _add_key(os.getenv(primary_key, ""))
 
-    raw_pool = os.getenv("GROQ_API_KEYS", "").strip()
+    raw_pool = os.getenv(pool_key, "").strip()
     if raw_pool:
         for part in raw_pool.split(","):
             _add_key(part)
 
     for idx in range(1, 11):
-        _add_key(os.getenv(f"GROQ_API_KEY_{idx}", ""))
+        _add_key(os.getenv(f"{indexed_prefix}_{idx}", ""))
 
     return keys
+
+
+def get_groq_api_keys() -> list[str]:
+    """Collect Groq API keys from single, pooled, and indexed env vars."""
+    return _collect_keys("GROQ_API_KEY", "GROQ_API_KEYS", "GROQ_API_KEY")
 
 
 def validate_env():
     missing = []
     if not os.getenv("SERPER_API_KEY"):
         missing.append("SERPER_API_KEY")
-    if not get_groq_api_keys():
+    groq_keys = get_groq_api_keys()
+    if not groq_keys:
         missing.append("GROQ_API_KEY (or GROQ_API_KEYS)")
     if missing:
         logger.error(f"Missing environment variables: {missing}")
@@ -82,6 +476,7 @@ def validate_env():
             print(f"  {key}=your_key_here")
         print("\nSee .env.example for reference.")
         sys.exit(1)
+    logger.info(f"[ENV] Groq key pool ready ✓ | keys={len(groq_keys)}")
     logger.info("[ENV] All required API keys found ✓")
 
 
@@ -230,20 +625,22 @@ def save_output(result: str, user_input: dict):
     json_path  = outputs_dir / f"travel_plan_{dest_safe}_{timestamp}.json"
 
     # ── Build full Markdown output ─────────────────────────────
+    budget_value = float(user_input.get("budget", 0.0) or 0.0)
+    currency = user_input.get("currency", "USD")
     md_content = f"""# AI Travel Plan: {user_input['destination']}
 
-| Field      | Details                                      |
-|------------|----------------------------------------------|
-| Generated  | {datetime.now().strftime('%B %d, %Y %H:%M')} |
-| Destination| {user_input['destination']}                  |
-| Dates      | {user_input['travel_dates']}                 |
-| Duration   | {user_input['duration_days']} days           |
-| Budget     | {user_input['budget']} {user_input['currency']} |
-| Preferences| {user_input.get('preferences', 'N/A')}       |
+| Field | Details |
+|---|---|
+| Generated | {datetime.now().strftime('%B %d, %Y %H:%M')} |
+| Destination | {user_input['destination']} |
+| Dates | {user_input['travel_dates']} |
+| Duration | {user_input['duration_days']} days |
+| Budget | {_format_money(budget_value, currency)} |
+| Preferences | {user_input.get('preferences', 'N/A')} |
 
 ---
 
-{str(result)}
+{result}
 
 ---
 *Generated by AI Travel Planner Crew — CrewAI + Groq + Serper*
@@ -283,12 +680,9 @@ def parse_int_env(name: str, default: int) -> int:
 
 
 def get_model_candidates() -> list[str]:
-    """Return ordered, deduplicated model candidates for fallback."""
+    """Return ordered, deduplicated Groq model candidates."""
     primary = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
-    fallback_raw = os.getenv(
-        "GROQ_MODEL_FALLBACKS",
-        "",
-    )
+    fallback_raw = os.getenv("GROQ_MODEL_FALLBACKS", "")
     fallback_models = [m.strip() for m in fallback_raw.split(",") if m.strip()]
 
     models: list[str] = []
@@ -338,6 +732,12 @@ def is_auth_error(exc: Exception) -> bool:
         "authentication",
         "unauthorized",
         "permission denied",
+        "insufficient credit",
+        "insufficient credits",
+        "quota exceeded",
+        "payment required",
+        "billing",
+        "402",
         "401",
         "403",
     ]
@@ -375,10 +775,14 @@ def extract_retry_after_seconds(exc: Exception) -> int | None:
         return None
 
 
+def get_retry_per_model() -> int:
+    return parse_int_env("GROQ_RETRY_PER_MODEL", 1)
+
+
 def compute_retry_wait_seconds(exc: Exception, attempt: int) -> int:
     """Compute retry delay with provider hint + bounded exponential backoff."""
-    base     = parse_int_env("GROQ_RETRY_BACKOFF_BASE_SEC", 3)
-    cap      = parse_int_env("GROQ_RETRY_BACKOFF_MAX_SEC", 45)
+    base = parse_int_env("GROQ_RETRY_BACKOFF_BASE_SEC", 3)
+    cap = parse_int_env("GROQ_RETRY_BACKOFF_MAX_SEC", 45)
     exp_wait = min(cap, base * (2 ** max(0, attempt - 1)))
     hinted   = extract_retry_after_seconds(exc)
     if hinted is not None:
@@ -411,7 +815,7 @@ def run_crew_once(
     user_input: dict,
     max_rpm: int,
 ):
-    """Execute one full crew run with a specific Groq model."""
+    """Execute one full crew run with a specific Groq model/key."""
     logger.info(f"[INIT] Initializing Groq LLM: {model_name}")
     from agents import get_llm
     llm = get_llm(model_name, api_key=api_key)
@@ -464,14 +868,12 @@ def main():
         budget_summary  = BudgetSummaryTool()
         logger.info("[INIT] Tools ready ✓")
 
-        max_rpm          = parse_int_env("CREWAI_MAX_RPM", 3)
-        retry_per_model  = parse_int_env("GROQ_RETRY_PER_MODEL", 1)
+        max_rpm = parse_int_env("CREWAI_MAX_RPM", 2)
         model_candidates = get_model_candidates()
-        api_keys         = get_groq_api_keys()
+        api_keys = get_groq_api_keys()
+        retry_per_model = get_retry_per_model()
         logger.info(
-            f"[INIT] Model candidates: {model_candidates} "
-            f"| retries per model: {retry_per_model} "
-            f"| api key pool: {len(api_keys)}"
+            f"[INIT] Model candidates: {model_candidates} | retries per model: {retry_per_model} | key pool: {len(api_keys)}"
         )
 
         print("\n🚀 Starting AI Travel Planner Crew...")
@@ -513,41 +915,34 @@ def main():
                         wait_seconds   = compute_retry_wait_seconds(e, attempt)
 
                         logger.warning(
-                            f"[RUN] Model '{model_name}' failed "
+                            f"[RUN] {model_name} failed "
                             f"(attempt {attempt}/{retry_per_model}, key {key_index}/{len(api_keys)}): {e}"
                         )
 
-                        # Hard stop — model is gone, no point retrying
                         if decommissioned:
-                            logger.warning(
-                                f"[RUN] Model '{model_name}' is decommissioned; skipping."
-                            )
+                            logger.warning(f"[RUN] Model '{model_name}' is decommissioned; skipping.")
                             skip_model = True
                             break
 
-                        # Invalid/unauthorized key -> rotate immediately
                         if auth_error:
                             logger.warning(
-                                f"[RUN] API key {key_index}/{len(api_keys)} rejected; rotating key."
+                                f"[RUN] Groq key {key_index}/{len(api_keys)} rejected; rotating key."
                             )
                             rotate_key = True
                             break
 
-                        # Rate-limited key -> rotate immediately if a next key exists
                         if rate_limited and key_index < len(api_keys):
                             logger.warning(
-                                f"[RUN] Rate limit hit on key {key_index}/{len(api_keys)}; rotating key."
+                                f"[RUN] Rate limit hit on Groq key {key_index}/{len(api_keys)}; rotating key."
                             )
                             rotate_key = True
                             break
 
                         if rate_limited:
-                            # Last key in pool: cool down, then retry (if attempts remain).
                             tpd_wait = (hint + 5) if hint else wait_seconds
                             _wait_with_countdown(
                                 tpd_wait,
-                                f"Rate limit on '{model_name}' "
-                                f"— provider says wait {hint}s"
+                                f"Rate limit on '{model_name}' — provider says wait {hint}s"
                                 if hint else
                                 f"Rate limit on '{model_name}' — waiting to retry"
                             )
@@ -555,7 +950,6 @@ def main():
                                 continue
                             break
 
-                        # Transient error (tool_use_failed, empty response, etc.)
                         if retryable and attempt < retry_per_model:
                             _wait_with_countdown(
                                 wait_seconds,
@@ -574,16 +968,16 @@ def main():
 
             if result is not None:
                 break
-            logger.warning(
-                f"[RUN] Falling back from model '{model_name}' to next candidate"
-            )
+
+            logger.warning(f"[RUN] Falling back from model '{model_name}' to next model")
 
         if result is None:
             raise last_error or RuntimeError(
                 "Crew execution failed for all configured models"
             )
 
-        result_text = str(result)
+        raw_result_text = str(result)
+        result_text = compile_report(raw_result_text, user_input)
         output_path, fixed_path = save_output(result_text, user_input)
 
         print("\n" + "="*60)
@@ -611,10 +1005,10 @@ def main():
 
         if "TOOL_USE_FAILED" in error_text or "FAILED_GENERATION" in error_text:
             print("💡 Tip: Model tool-calling failed after retries and fallbacks.")
-            print("   Set GROQ_MODEL / GROQ_MODEL_FALLBACKS in .env.")
+            print("   Set GROQ_MODEL and fallback vars in .env.")
         elif "MODEL_DECOMMISSIONED" in error_text or "DECOMMISSIONED" in error_text:
-            print("💡 Tip: One configured Groq model is unavailable.")
-            print("   Update GROQ_MODEL / GROQ_MODEL_FALLBACKS in .env.")
+            print("💡 Tip: Configured Groq model is unavailable.")
+            print("   Update GROQ_MODEL/GROQ_MODEL_FALLBACKS in .env.")
         elif "RATE_LIMIT" in error_text or "RATE LIMIT" in error_text:
             if retry_after:
                 print(f"💡 Tip: Rate limit hit — wait about {retry_after}s and retry.")

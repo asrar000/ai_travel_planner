@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-02-27T10:26:15.227639",
+  "user_input": {
+    "destination": "Berlin,Germany",
+    "travel_dates": "May 1-5 ,2026",
+    "duration_days": 5,
+    "budget": 2000.0,
+    "currency": "EUR",
+    "preferences": "Halal Foods,Best places to visit and cheap stays"
+  },
+  "output_file": "outputs/travel_plan_Berlin_Germany_20260227_102615.md",
+  "fixed_output_file": "outputs/output.md",
+  "log_file": "logs/travel_planner_20260227_101947.log"
+}

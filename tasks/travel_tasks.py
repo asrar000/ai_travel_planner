@@ -89,15 +89,20 @@ def create_tasks(
         Use SerperSearch for 1 query:
         - "{destination} attraction opening hours and best areas"
 
-        For each day include 1 morning, 1 afternoon, 1 evening item,
-        estimated cost, and one tip.
+        Output **every day explicitly** from Day 1 to Day {duration_days}.
+        For each day use this exact short contract:
+        - Morning: ...
+        - Afternoon: ...
+        - Evening: ...
+        - Estimated cost: ...
+
         Ensure no time conflicts, realistic routing, and budget alignment.
         Day 1 includes arrival/check-in. Final day includes departure.
         """,
         agent=itinerary_designer,
         expected_output=f"""
-        Compact itinerary for exactly {duration_days} days, max ~320 words total,
-        with daily schedule, costs, transport notes, and total estimate.
+        Compact itinerary for exactly {duration_days} days (Day 1..Day {duration_days}),
+        each day with Morning/Afternoon/Evening/Estimated cost lines, max ~360 words.
         """,
         context=[]
     )
@@ -113,6 +118,7 @@ def create_tasks(
         2. Itinerary feasibility and timing
         3. Data consistency across research/budget/itinerary
         4. Risks (weather, budget, logistics, data confidence)
+        5. Day coverage completeness: Day 1..Day {duration_days} must exist
 
         Compile final Markdown:
         # Travel Plan: {destination}
@@ -125,7 +131,7 @@ def create_tasks(
         ## Recommendations
         ## Assumptions Made
 
-        Keep final response short (about 450 words max).
+        Keep final response short (about 450 words max) and structured.
         """,
         agent=validation_agent,
         expected_output=f"""

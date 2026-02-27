@@ -43,14 +43,18 @@ def _parse_float_env(name: str, default: float) -> float:
         return default
 
 
-def get_llm(model_name: str = "llama-3.3-70b-versatile", api_key: str | None = None):
+def get_llm(
+    model_name: str = "llama-3.3-70b-versatile",
+    api_key: str | None = None,
+):
     """Initialize Groq model with stable (non-native) tool usage mode."""
     resolved_api_key = (api_key or os.getenv("GROQ_API_KEY", "")).strip()
     if not resolved_api_key:
         raise ValueError("GROQ_API_KEY not found in environment variables!")
 
     os.environ["GROQ_API_KEY"] = resolved_api_key
-    max_tokens = _parse_int_env("GROQ_MAX_TOKENS", 280)
+
+    max_tokens = _parse_int_env("GROQ_MAX_TOKENS", 420)
     timeout_seconds = _parse_int_env("GROQ_TIMEOUT_SECONDS", 45)
     temperature = _parse_float_env("GROQ_TEMPERATURE", 0.0)
 

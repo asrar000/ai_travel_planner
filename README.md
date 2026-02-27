@@ -1,6 +1,6 @@
 # 🌍 AI Travel Planner Crew
 
-Multi-agent AI travel planning system using **CrewAI** + **Serper Dev API** + **Groq API**.
+Multi-agent AI travel planning system using **CrewAI** + **Serper Dev API** + **Groq**.
 
 ## Architecture
 
@@ -40,6 +40,12 @@ User Input
     ▼
 Final Structured Output (Markdown + JSON saved to outputs/)
 ```
+
+Note: final output is post-processed by a deterministic compiler that:
+- enforces required sections,
+- guarantees Day 1..Day N coverage,
+- auto-fills missing short day slots without extra API calls.
+Provider behavior: uses **Groq key rotation** when one key hits rate/auth limits.
 
 ## Project Structure
 
@@ -116,21 +122,24 @@ Trip duration is auto-derived from dates (default 5 days if parsing fails).
 | Error | Fix |
 |-------|-----|
 | `SERPER_API_KEY not found` | Check `.env` file |
-| `GROQ_API_KEY not found` | Set `GROQ_API_KEY` or `GROQ_API_KEYS` in `.env` |
-| `tool_use_failed` / `failed_generation` | App retries then falls back; tune `GROQ_MODEL` and `GROQ_MODEL_FALLBACKS` |
-| `model_decommissioned` | Remove deprecated model from `GROQ_MODEL_FALLBACKS` in `.env` |
-| `Rate limit exceeded` | App rotates to the next key from `GROQ_API_KEYS`; if all keys are limited, it backs off |
+| `GROQ_API_KEY not found` | Set Groq keys in `.env` (`GROQ_API_KEY` or `GROQ_API_KEYS`) |
+| `tool_use_failed` / `failed_generation` | App retries/rotates keys; tune Groq model fallback vars |
+| `model_decommissioned` | Remove deprecated model from `GROQ_MODEL_FALLBACKS` |
+| `Rate limit exceeded` | App rotates Groq keys in pool; if exhausted, wait and retry |
+| `Incomplete day itinerary` | Compiler auto-fills missing day slots (Day 1..Day N) without extra LLM calls |
 | `Invalid response from LLM call - None or empty` | Retry once; if repeated, lower `CREWAI_MAX_RPM` and keep prompts/tool output compact |
 | `ModuleNotFoundError` | Run `source venv/bin/activate` first |
 
 Recommended rate-limit settings in `.env`:
 - `GROQ_MODEL=llama-3.3-70b-versatile`
 - `GROQ_MODEL_FALLBACKS=llama-3.1-8b-instant`
-- `GROQ_API_KEYS=gsk_key_1,gsk_key_2,gsk_key_3`
+- `GROQ_API_KEYS=gsk_key_1,gsk_key_2,gsk_key_3,gsk_key_4`
 - `GROQ_RETRY_PER_MODEL=1`
 - `CREWAI_MAX_RPM=2`
 - `SERPER_RESULTS_LIMIT=2`
 - `SERPER_SNIPPET_MAX_CHARS=120`
 - `SERPER_INCLUDE_SNIPPET=false`
-- `GROQ_MAX_TOKENS=280`
+- `GROQ_MAX_TOKENS=420`
 - `GROQ_TEMPERATURE=0.0`
+
+Security note: never commit real API keys to git; keep them only in local `.env`.
